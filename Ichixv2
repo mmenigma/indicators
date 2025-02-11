@@ -24,7 +24,7 @@ using NinjaTrader.NinjaScript.DrawingTools;
 //This namespace holds Indicators in this folder and is required. Do not change it. 
 namespace NinjaTrader.NinjaScript.Indicators
 {
-    public class Ichixv2 : Indicator
+    public class ichixv2 : Indicator
     {
         private Dictionary<string, DXMediaMap> dxmBrushes;
         private bool lastBullish = false;
@@ -35,7 +35,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (State == State.SetDefaults)
             {
                 Description = @"Enter the description for your new custom Indicator here.";
-                Name = "Ichixv2";
+                Name = "ichixv2";
                 Calculate = Calculate.OnPriceChange;
                 IsOverlay = true;
                 DisplayInDataBox = true;
@@ -558,4 +558,60 @@ namespace NinjaTrader.NinjaScript.Indicators
         #endregion
     }
 }
+
+#region NinjaScript generated code. Neither change nor remove.
+
+namespace NinjaTrader.NinjaScript.Indicators
+{
+	public partial class Indicator : NinjaTrader.Gui.NinjaScript.IndicatorRenderBase
+	{
+		private ichixv2[] cacheichixv2;
+		public ichixv2 ichixv2(bool trendWithCloud, bool chikouBreakout, string longOn, string shortOn, double signal_Offset, bool displayCloudOnly, bool adjustBarMargins, int periodFast, int periodMedium, int periodSlow, int cloudColorOpacity, Brush cloudAreaColorUp, Brush cloudAreaColorDown, int cloudDisplacement)
+		{
+			return ichixv2(Input, trendWithCloud, chikouBreakout, longOn, shortOn, signal_Offset, displayCloudOnly, adjustBarMargins, periodFast, periodMedium, periodSlow, cloudColorOpacity, cloudAreaColorUp, cloudAreaColorDown, cloudDisplacement);
+		}
+
+		public ichixv2 ichixv2(ISeries<double> input, bool trendWithCloud, bool chikouBreakout, string longOn, string shortOn, double signal_Offset, bool displayCloudOnly, bool adjustBarMargins, int periodFast, int periodMedium, int periodSlow, int cloudColorOpacity, Brush cloudAreaColorUp, Brush cloudAreaColorDown, int cloudDisplacement)
+		{
+			if (cacheichixv2 != null)
+				for (int idx = 0; idx < cacheichixv2.Length; idx++)
+					if (cacheichixv2[idx] != null && cacheichixv2[idx].TrendWithCloud == trendWithCloud && cacheichixv2[idx].ChikouBreakout == chikouBreakout && cacheichixv2[idx].LongOn == longOn && cacheichixv2[idx].ShortOn == shortOn && cacheichixv2[idx].Signal_Offset == signal_Offset && cacheichixv2[idx].DisplayCloudOnly == displayCloudOnly && cacheichixv2[idx].AdjustBarMargins == adjustBarMargins && cacheichixv2[idx].PeriodFast == periodFast && cacheichixv2[idx].PeriodMedium == periodMedium && cacheichixv2[idx].PeriodSlow == periodSlow && cacheichixv2[idx].CloudColorOpacity == cloudColorOpacity && cacheichixv2[idx].CloudAreaColorUp == cloudAreaColorUp && cacheichixv2[idx].CloudAreaColorDown == cloudAreaColorDown && cacheichixv2[idx].CloudDisplacement == cloudDisplacement && cacheichixv2[idx].EqualsInput(input))
+						return cacheichixv2[idx];
+			return CacheIndicator<ichixv2>(new ichixv2(){ TrendWithCloud = trendWithCloud, ChikouBreakout = chikouBreakout, LongOn = longOn, ShortOn = shortOn, Signal_Offset = signal_Offset, DisplayCloudOnly = displayCloudOnly, AdjustBarMargins = adjustBarMargins, PeriodFast = periodFast, PeriodMedium = periodMedium, PeriodSlow = periodSlow, CloudColorOpacity = cloudColorOpacity, CloudAreaColorUp = cloudAreaColorUp, CloudAreaColorDown = cloudAreaColorDown, CloudDisplacement = cloudDisplacement }, input, ref cacheichixv2);
+		}
+	}
+}
+
+namespace NinjaTrader.NinjaScript.MarketAnalyzerColumns
+{
+	public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
+	{
+		public Indicators.ichixv2 ichixv2(bool trendWithCloud, bool chikouBreakout, string longOn, string shortOn, double signal_Offset, bool displayCloudOnly, bool adjustBarMargins, int periodFast, int periodMedium, int periodSlow, int cloudColorOpacity, Brush cloudAreaColorUp, Brush cloudAreaColorDown, int cloudDisplacement)
+		{
+			return indicator.ichixv2(Input, trendWithCloud, chikouBreakout, longOn, shortOn, signal_Offset, displayCloudOnly, adjustBarMargins, periodFast, periodMedium, periodSlow, cloudColorOpacity, cloudAreaColorUp, cloudAreaColorDown, cloudDisplacement);
+		}
+
+		public Indicators.ichixv2 ichixv2(ISeries<double> input , bool trendWithCloud, bool chikouBreakout, string longOn, string shortOn, double signal_Offset, bool displayCloudOnly, bool adjustBarMargins, int periodFast, int periodMedium, int periodSlow, int cloudColorOpacity, Brush cloudAreaColorUp, Brush cloudAreaColorDown, int cloudDisplacement)
+		{
+			return indicator.ichixv2(input, trendWithCloud, chikouBreakout, longOn, shortOn, signal_Offset, displayCloudOnly, adjustBarMargins, periodFast, periodMedium, periodSlow, cloudColorOpacity, cloudAreaColorUp, cloudAreaColorDown, cloudDisplacement);
+		}
+	}
+}
+
+namespace NinjaTrader.NinjaScript.Strategies
+{
+	public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
+	{
+		public Indicators.ichixv2 ichixv2(bool trendWithCloud, bool chikouBreakout, string longOn, string shortOn, double signal_Offset, bool displayCloudOnly, bool adjustBarMargins, int periodFast, int periodMedium, int periodSlow, int cloudColorOpacity, Brush cloudAreaColorUp, Brush cloudAreaColorDown, int cloudDisplacement)
+		{
+			return indicator.ichixv2(Input, trendWithCloud, chikouBreakout, longOn, shortOn, signal_Offset, displayCloudOnly, adjustBarMargins, periodFast, periodMedium, periodSlow, cloudColorOpacity, cloudAreaColorUp, cloudAreaColorDown, cloudDisplacement);
+		}
+
+		public Indicators.ichixv2 ichixv2(ISeries<double> input , bool trendWithCloud, bool chikouBreakout, string longOn, string shortOn, double signal_Offset, bool displayCloudOnly, bool adjustBarMargins, int periodFast, int periodMedium, int periodSlow, int cloudColorOpacity, Brush cloudAreaColorUp, Brush cloudAreaColorDown, int cloudDisplacement)
+		{
+			return indicator.ichixv2(input, trendWithCloud, chikouBreakout, longOn, shortOn, signal_Offset, displayCloudOnly, adjustBarMargins, periodFast, periodMedium, periodSlow, cloudColorOpacity, cloudAreaColorUp, cloudAreaColorDown, cloudDisplacement);
+		}
+	}
+}
+
 #endregion
