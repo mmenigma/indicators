@@ -54,25 +54,25 @@ namespace NinjaTrader.NinjaScript.Indicators
                 foreach (string brushName in new string[] { "CloudAreaColorUp", "CloudAreaColorDown" })
                     dxmBrushes.Add(brushName, new DXMediaMap());
 
-                DisplayCloudOnly = true;
+                DisplayCloudOnly = false;
                 AdjustBarMargins = false;
 
                 PeriodFast = 9;
                 PeriodMedium = 26;
                 PeriodSlow = 52;
 
-                CloudColorOpacity = 40;
+                CloudColorOpacity = 20;
                 CloudAreaColorUp = Brushes.Green;
                 CloudAreaColorDown = Brushes.Red;
 
                 CloudDisplacement = 26;
 
-                AddPlot(Brushes.Red, "TenkanSen (Conversion Line)");
-                AddPlot(Brushes.Purple, "KijunSen (Base Line)");
-                AddPlot(Brushes.MediumBlue, "ChikouSpan (Lagging Span)");
-
-                AddPlot(Brushes.Green, "SenkouSpanA (Leading Span A)");
-                AddPlot(Brushes.Red, "SenkouSpanB (Leading Span B)");
+                AddPlot(new Stroke(Brushes.Yellow, 2), PlotStyle.Line, "TenkanSen (Conversion Line)");
+				AddPlot(new Stroke(Brushes.DodgerBlue, 2), PlotStyle.Line, "KijunSen (Base Line)");
+				AddPlot(new Stroke(Brushes.BlueViolet, DashStyleHelper.Dash, 2), PlotStyle.Line, "ChikouSpan (Lagging Span)");
+				
+				AddPlot(new Stroke(Brushes.Transparent, DashStyleHelper.Dash, 2), PlotStyle.Line, "SenkouSpanA (Leading Span A)");
+				AddPlot(new Stroke(Brushes.Transparent, DashStyleHelper.Dash, 2), PlotStyle.Line, "SenkouSpanB (Leading Span B)");
 
                 LongOn = "LongOn ";
                 ShortOn = "ShortOn ";
@@ -139,7 +139,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 else if (lastBullish && Close[0] < Open[0]) // Reset bullish trend if bearish bar closes
                 {
                     lastBullish = false;
-                    Print($"Resetting Bullish Trend at {CurrentBar}");
+                   // Print($"Resetting Bullish Trend at {CurrentBar}");
                 }
 
                 if (isBearish && (!lastBearish || lastBullish))
@@ -151,29 +151,34 @@ namespace NinjaTrader.NinjaScript.Indicators
                 else if (lastBearish && Close[0] > Open[0]) // Reset bearish trend if bullish bar closes
                 {
                     lastBearish = false;
-                    Print($"Resetting Bearish Trend at {CurrentBar}");
+                    //Print($"Resetting Bearish Trend at {CurrentBar}");
                 }
             }
             // End Trend with Cloud
 
-            // Begin Chikou Breakout
-            if (ChikouBreakout && CurrentBar >= PeriodMedium)
-            {
-                bool chikouAbovePrice = ChikouSpan[PeriodMedium] > Close[PeriodMedium];
-                bool chikouBelowPrice = ChikouSpan[PeriodMedium] < Close[PeriodMedium];
-                bool priceAboveKumo = Close[0] > SenkouSpanA[0] && Close[0] > SenkouSpanB[0];
-                bool priceBelowKumo = Close[0] < SenkouSpanA[0] && Close[0] < SenkouSpanB[0];
+     // Begin Chikou Breakout
+if (ChikouBreakout && CurrentBar >= PeriodMedium + 1) // Ensure there are enough bars for the previous bar check
+{
+    // Check if Chikou crossed above or below the price of 26 days ago
+    bool chikouCrossedAbove = ChikouSpan[PeriodMedium + 1] <= Close[PeriodMedium + 1] && ChikouSpan[PeriodMedium] > Close[PeriodMedium];
+    bool chikouCrossedBelow = ChikouSpan[PeriodMedium + 1] >= Close[PeriodMedium + 1] && ChikouSpan[PeriodMedium] < Close[PeriodMedium];
 
-                if (chikouAbovePrice && priceAboveKumo)
-                {
-                    Draw.TriangleUp(this, LongOn + CurrentBar, false, 0, Low[0] - TickSize * Signal_Offset, Brushes.DodgerBlue);
-                }
-                else if (chikouBelowPrice && priceBelowKumo)
-                {
-                    Draw.TriangleDown(this, ShortOn + CurrentBar, false, 0, High[0] + TickSize * Signal_Offset, Brushes.Yellow);
-                }
-            }
-            // End Chikou Breakout
+    // Check if the current price is above or below the future Kumo
+    bool priceAboveKumo = Close[0] > SenkouSpanA[CloudDisplacement] && Close[0] > SenkouSpanB[CloudDisplacement];
+    bool priceBelowKumo = Close[0] < SenkouSpanA[CloudDisplacement] && Close[0] < SenkouSpanB[CloudDisplacement];
+ 
+    if (chikouCrossedAbove && priceAboveKumo)
+    {
+        Draw.Diamond(this, LongOn + CurrentBar, false, 0, Low[0] - TickSize * Signal_Offset, Brushes.Lime);
+        // Print($"Bullish Signal on Bar {CurrentBar}: Chikou crossed above the price of 26 days ago, and the current price is above the Kumo.");
+    }
+    else if (chikouCrossedBelow && priceBelowKumo)
+    {
+        Draw.Diamond(this, ShortOn + CurrentBar, false, 0, High[0] + TickSize * Signal_Offset, Brushes.Red);
+        // Print($"Bearish Signal on Bar {CurrentBar}: Chikou crossed below the price of 26 days ago, and the current price is below the Kumo.");
+    }
+}
+// End Chikou Breakout
         }
 
         public override void OnRenderTargetChanged()
@@ -428,11 +433,11 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         #region Properties
         [NinjaScriptProperty]
-        [Display(Name = "Trend With Cloud", GroupName = "Enable Signals", Order = 7)]
+        [Display(Name = "Trend with Cloud ▲", GroupName = "Enable Signals", Order = 1)]
         public bool TrendWithCloud { get; set; }
 
         [NinjaScriptProperty]
-        [Display(Name = "Chikou Breakout", GroupName = "Enable Signals", Order = 8)]
+        [Display(Name = "Chikou Breakout ◆", GroupName = "Enable Signals", Order = 2)]
         public bool ChikouBreakout { get; set; }
 
         [NinjaScriptProperty]
