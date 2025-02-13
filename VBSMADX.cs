@@ -24,7 +24,7 @@ using NinjaTrader.NinjaScript.DrawingTools;
 //This namespace holds Indicators in this folder and is required. Do not change it. 
 namespace NinjaTrader.NinjaScript.Indicators
 {
-    public class VolBuySellMomentumv3ModSig : Indicator
+    public class VBSMADX : Indicator
     {
         private double xROC;
         private Series<double> nRes1, nRes2, nRes3, nResEMA3, PNVI_PEMA_Diff;
@@ -37,7 +37,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (State == State.SetDefaults)
             {
                 Description = @"Enter the description for your new custom Indicator here.";
-                Name = "VolBuySellMomentumv3ModSig";
+                Name = "VBSMADX";
                 Calculate = Calculate.OnBarClose;
                 DisplayInDataBox = true;
                 DrawOnPricePanel = true;
