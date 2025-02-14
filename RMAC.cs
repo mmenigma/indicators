@@ -62,10 +62,10 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                 AddPlot(Brushes.BlueViolet, "MACD Signal Line"); // MACD Signal Line
                 AddLine(new Stroke(Brushes.Yellow, 1) { DashStyleHelper = DashStyleHelper.Dash }, 50, "Zero Line"); // Dashed Zero Line (centered at 50)
 
-                // RSI Middle Line (60)
-                Stroke rsiMiddleLineStroke = new Stroke(Brushes.Red, 1);
-                rsiMiddleLineStroke.DashStyleHelper = DashStyleHelper.Dash;
-                AddLine(rsiMiddleLineStroke, 60, "RSI Middle Line");
+               // RSI Middle Line
+			    Stroke rsiMiddleLineStroke = new Stroke(Brushes.Red, 1);
+			    rsiMiddleLineStroke.DashStyleHelper = DashStyleHelper.Dash;
+			    AddLine(rsiMiddleLineStroke, 60, "RSI Middle Line");  // This creates the line with default value 60
 
                 // Signal Settings
                 ShowEntrySignals = false;
@@ -98,21 +98,21 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
             }
         }
 
-		protected override void OnBarUpdate()
-		{
-	    double input0 = Input[0];
-	
-	    if (CurrentBar == 0)
-	    {
-	        fastEma[0] = input0;
-	        slowEma[0] = input0;
-	        gain[0] = 0;
-	        loss[0] = 0;
-	        Values[0][0] = 50; // MACD Line (normalized to RSI scale)
-	        Values[1][0] = 50; // MACD Signal Line (normalized to RSI scale)
-	    }
-	    else
-	    {
+protected override void OnBarUpdate()
+{
+    double input0 = Input[0];
+
+    if (CurrentBar == 0)
+    {
+        fastEma[0] = input0;
+        slowEma[0] = input0;
+        gain[0] = 0;
+        loss[0] = 0;
+        Values[0][0] = 50; // MACD Line (normalized to RSI scale)
+        Values[1][0] = 50; // MACD Signal Line (normalized to RSI scale)
+    }
+    else
+    {
         // MACD Calculation
         double fastEma0 = constant1 * input0 + constant2 * fastEma[1];
         double slowEma0 = constant3 * input0 + constant4 * slowEma[1];
@@ -130,40 +130,42 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
         Values[0][0] = macdNormalized; // MACD Line
         Values[1][0] = macdAvgNormalized; // MACD Signal Line
 
-       // LongOn Signal Conditions
-		if (Values[0][0] > Values[1][0] && Values[0][0] > 60) // MACD Line > MACD Signal Line AND MACD Line > RSI Middle Line (60)
-		{
-		    if (!LongOnSignalActive) // Only print the first signal
-		    {
-		        Draw.ArrowUp(this, LongOn + CurrentBar, true, 0, Low[0] - TickSize * Signal_Offset, Brushes.Lime);
-		        LongOnSignalActive = true; // Set signal active
-		    }
-		}
-		
-		// ShortOn Signal Conditions
-		if (Values[0][0] < Values[1][0] && Values[0][0] < 50) // MACD Line < MACD Signal Line AND MACD Line < MACD Zero Line (50)
-		{
-		    if (!ShortOnSignalActive) // Only print the first signal
-		    {
-		        Draw.ArrowDown(this, ShortOn + CurrentBar, true, 0, High[0] + TickSize * Signal_Offset, Brushes.Red);
-		        ShortOnSignalActive = true; // Set signal active
-		    }
-		}
-		
-		// LongOff Exit Signal Conditions
-		if (ShowExitSignals && LongOnSignalActive && CrossBelow(Values[0], Values[1], 1)) // MACD Line crosses below MACD Signal Line
-		{
-		    Draw.ArrowDown(this, LongOff + CurrentBar, true, 0, High[0] + TickSize * (Signal_Offset + 30), Brushes.Transparent); // Add 10-tick offset
-		    LongOnSignalActive = false; // Reset LongOn signal
-		}
-		
-		// ShortOff Exit Signal Conditions
-		if (ShowExitSignals && ShortOnSignalActive && CrossAbove(Values[0], Values[1], 1)) // MACD Line crosses above MACD Signal Line
-		{
-		    Draw.ArrowUp(this, ShortOff + CurrentBar, true, 0, Low[0] - TickSize * (Signal_Offset + 30), Brushes.Transparent); // Add 10-tick offset
-		    ShortOnSignalActive = false; // Reset ShortOn signal
-		}
-	}
+        // LongOn Signal Conditions
+        if (ShowEntrySignals && Values[0][0] > Values[1][0] && Values[0][0] > Lines[1].Value)
+        {
+            if (!LongOnSignalActive)
+            {
+                Draw.ArrowUp(this, LongOn + CurrentBar, true, 0, Low[0] - TickSize * Signal_Offset, Brushes.Lime);
+                LongOnSignalActive = true;
+                ShortOnSignalActive = false; // Reset short signal flag
+            }
+        }
+
+        // ShortOn Signal Conditions
+        if (ShowEntrySignals && Values[0][0] < Values[1][0] && Values[0][0] < 50)
+        {
+            if (!ShortOnSignalActive)
+            {
+                Draw.ArrowDown(this, ShortOn + CurrentBar, true, 0, High[0] + TickSize * Signal_Offset, Brushes.Red);
+                ShortOnSignalActive = true;
+                LongOnSignalActive = false; // Reset long signal flag
+            }
+        }
+
+        // LongOff Exit Signal Conditions
+        if (ShowExitSignals && LongOnSignalActive && CrossBelow(Values[0], Values[1], 1))
+        {
+            Draw.ArrowDown(this, LongOff + CurrentBar, true, 0, High[0] + TickSize * (Signal_Offset + 30), Brushes.Transparent);
+            LongOnSignalActive = false;
+        }
+
+        // ShortOff Exit Signal Conditions
+        if (ShowExitSignals && ShortOnSignalActive && CrossAbove(Values[0], Values[1], 1))
+        {
+            Draw.ArrowUp(this, ShortOff + CurrentBar, true, 0, Low[0] - TickSize * (Signal_Offset + 30), Brushes.Transparent);
+            ShortOnSignalActive = false;
+        }
+    }
 }
 
         #region Properties
