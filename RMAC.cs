@@ -63,9 +63,9 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                 AddLine(new Stroke(Brushes.Yellow, 1) { DashStyleHelper = DashStyleHelper.Dash }, 50, "Zero Line"); // Dashed Zero Line (centered at 50)
 
                // RSI Middle Line
-			    Stroke rsiMiddleLineStroke = new Stroke(Brushes.Red, 1);
-			    rsiMiddleLineStroke.DashStyleHelper = DashStyleHelper.Dash;
-			    AddLine(rsiMiddleLineStroke, 60, "RSI Middle Line");  // This creates the line with default value 60
+		Stroke rsiMiddleLineStroke = new Stroke(Brushes.Red, 1);
+		rsiMiddleLineStroke.DashStyleHelper = DashStyleHelper.Dash;
+		AddLine(rsiMiddleLineStroke, 60, "RSI Middle Line");  // This creates the line with default value 60
 
                 // Signal Settings
                 ShowEntrySignals = false;
