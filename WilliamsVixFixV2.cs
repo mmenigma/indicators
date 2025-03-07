@@ -98,85 +98,56 @@ protected override void OnBarUpdate()
     double rangeHigh = HP * MAX(wvfSeries, PHigh)[0];
     double rangeLow = LP * MIN(wvfSeries, PHigh)[0];
 
-    // Store current conditions in series for use in the next bar
-    isAboveUpperBandSeries[0] = wvfSeries[0] >= upperBand || wvfSeries[0] >= rangeHigh;
+    // Store whether WVF is above upper band/range high
+    bool isWvfHigh = wvfSeries[0] >= upperBand || wvfSeries[0] >= rangeHigh;
+    bool wasWvfHigh = wvfSeries[1] >= upperBand || wvfSeries[1] >= rangeHigh;
+    
+    // Store current conditions in series for next bar
+    isAboveUpperBandSeries[0] = isWvfHigh;
     isBelowLowerBandSeries[0] = wvfSeries[0] <= lowerBand || wvfSeries[0] <= rangeLow;
 
     // Set the plot value for the WVF histogram
     Values[0][0] = wvfSeries[0];
 
     // Apply color to the WVF histogram (indicator bars)
-    if (isAboveUpperBandSeries[0])
-    {
-        PlotBrushes[0][0] = Brushes.Lime; // Lime for WVF above upper band/range high
-    }
-    else
-    {
-        PlotBrushes[0][0] = Brushes.Gray; // Gray for WVF below upper band/range high
-    }
+    PlotBrushes[0][0] = isWvfHigh ? Brushes.Lime : Brushes.Gray;
 
-    // Simple Entry Criteria (Fuchsia)
+    // Reset entry flags
+    isSimpleEntrySeries[0] = false;
+    isFilteredEntrySeries[0] = false;
+    
+    // Price action criteria - matching .pin logic more closely
+    bool upRange = Low[0] > Low[1] && Close[0] > High[1];
+    bool strengthCriteria = Close[0] > Close[str] && (Close[0] < Close[ltLB] || Close[0] < Close[mtLB]);
+    
+    // Simple Entry - Fuchsia (bFiltered in .pin)
     bool isSimpleEntry = false;
-    if (!isAboveUpperBandSeries[0] && (isAboveUpperBandSeries[1] || wvfSeries[1] >= rangeHigh))
+    if (wasWvfHigh && !isWvfHigh) // WVF crossed below upperBand/rangeHigh
     {
-        // Additional criteria to reduce fuchsia bars
-        bool isStrongSignal = Close[0] > Close[str] && (Close[0] < Close[ltLB] || Close[0] < Close[mtLB]);
-        if (isStrongSignal)
-        {
-            isSimpleEntry = true; // WVF crossed below upper band/range high and strong signal
-        }
+        isSimpleEntry = true;
     }
-    else if (!isBelowLowerBandSeries[0] && (isBelowLowerBandSeries[1] || wvfSeries[1] <= rangeLow))
-    {
-        // Additional criteria to reduce fuchsia bars
-        bool isStrongSignal = Close[0] < Close[str] && (Close[0] > Close[ltLB] || Close[0] > Close[mtLB]);
-        if (isStrongSignal)
-        {
-            isSimpleEntry = true; // WVF crossed above lower band/range low and strong signal
-        }
-    }
-
-    // Filtered Entry Criteria (White)
+    
+    // Filtered Entry - White (.pin alert3 logic)
     bool isFilteredEntry = false;
-    if (isAboveUpperBandSeries[0] && (isAboveUpperBandSeries[1] || wvfSeries[1] >= rangeHigh))
+    if (wasWvfHigh && !isWvfHigh && upRange && strengthCriteria)
     {
-        // Additional price action criteria for filtered entry
-        bool priceActionCriteria = Close[0] > Close[str] && (Close[0] < Close[ltLB] || Close[0] < Close[mtLB]);
-        if (priceActionCriteria)
-        {
-            isFilteredEntry = true; // WVF remains above upper band/range high and price action criteria met
-        }
-    }
-    else if (isBelowLowerBandSeries[0] && (isBelowLowerBandSeries[1] || wvfSeries[1] <= rangeLow))
-    {
-        // Additional price action criteria for filtered entry
-        bool priceActionCriteria = Close[0] < Close[str] && (Close[0] > Close[ltLB] || Close[0] > Close[mtLB]);
-        if (priceActionCriteria)
-        {
-            isFilteredEntry = true; // WVF remains below lower band/range low and price action criteria met
-        }
+        isFilteredEntry = true;
     }
 
-    // Apply color to the price bars based on the criteria
-    if (HighlightFuchsia && isSimpleEntry && !isSimpleEntrySeries[1] && !isFilteredEntrySeries[1])
+    // Apply colors - prioritize Filtered (White) over Simple (Fuchsia)
+    if (HighlightWhite && isFilteredEntry && !isFilteredEntrySeries[1] && !isSimpleEntrySeries[1])
     {
-        BarBrushes[0] = Brushes.Fuchsia; // Fuchsia for simple entry signal (only one bar)
-        isSimpleEntrySeries[0] = true; // Mark this bar as simple entry
+        BarBrushes[0] = Brushes.White;
+        isFilteredEntrySeries[0] = true;
     }
-    else if (HighlightWhite && isFilteredEntry && !isFilteredEntrySeries[1] && !isSimpleEntrySeries[1])
+    else if (HighlightFuchsia && isSimpleEntry && !isSimpleEntrySeries[1] && !isFilteredEntrySeries[1])
     {
-        // Ensure white bars only appear near Lime bars (potential bottoms)
-        if (isAboveUpperBandSeries[0] || isAboveUpperBandSeries[1])
-        {
-            BarBrushes[0] = Brushes.White; // White for filtered entry signal (only one bar)
-            isFilteredEntrySeries[0] = true; // Mark this bar as filtered entry
-        }
+        BarBrushes[0] = Brushes.Fuchsia;
+        isSimpleEntrySeries[0] = true;
     }
     else
     {
-        BarBrushes[0] = null; // Default chart color for all other bars
-        isSimpleEntrySeries[0] = false; // Reset simple entry flag
-        isFilteredEntrySeries[0] = false; // Reset filtered entry flag
+        BarBrushes[0] = null; // Default chart color
     }
 }
 
