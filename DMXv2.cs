@@ -219,159 +219,227 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                     }
                 }
 
-                // DI Divergence Signal Logic - FIRST SIGNAL ONLY APPROACH
-                if (DIDiv && ADXPlot[0] >= TradeThresholdDefault)
-                {
-                    // === LONG SIGNAL DETECTION AND TRACKING ===
-                    
-                    // 1. Check for new crossover (DI+ crosses above DI-)
-                    if (CrossAbove(DiPlus, DiMinus, 1))
-                    {
-                        // Reset tracking for a new potential signal
-                        longCrossoverBar = CurrentBar;
-                        hasGeneratedLongSignal = false;
-                    }
-                    
-                    // 2. Check for convergence pattern (without crossover)
-                    if (DiPlus[0] > DiMinus[0]) // DI+ must be above DI-
-                    {
-                        double currentDiff = DiPlus[0] - DiMinus[0];
-                        double prevDiff = DiPlus[1] - DiMinus[1];
-                        
-                        // Find when lines have converged and now start diverging
-                        if (currentDiff > prevDiff && prevDiff <= DIConvergenceThreshold)
-                        {
-                            // Found a new convergence point where lines start diverging again
-                            longConvergenceBar = CurrentBar;
-                            hasGeneratedLongSignal = false;
-                        }
-                    }
-                    
-                    // 3. Signal on first occurrence of conditions after crossover
-                    if (longCrossoverBar > 0 && !hasGeneratedLongSignal && 
-                        CurrentBar > longCrossoverBar && (CurrentBar - longCrossoverBar) <= 15)
-                    {
-                        // Get values at crossover
-                        double diPlusAtCross = DiPlus[CurrentBar - longCrossoverBar];
-                        double diMinusAtCross = DiMinus[CurrentBar - longCrossoverBar];
-                        
-                        // Check for divergence and volume condition
-                        double diPlusDiff = DiPlus[0] - diPlusAtCross;
-                        double diMinusDiff = diMinusAtCross - DiMinus[0];
-                        
-                        // First time both conditions are met after a crossover
-                        if (diPlusDiff >= DIDivergencePoints && 
-                            diMinusDiff >= DIDivergencePoints && 
-                            DiPlus[0] > DiMinus[0] &&
-                            buyVolumeEMA[0] > sellVolumeEMA[0])
-                        {
-                            // Generate first signal after crossover
-                            Draw.TriangleUp(this, LongFilterOn + CurrentBar, true, 0, 
-                                Low[0] - Signal_Offset * TickSize, Brushes.DodgerBlue);
-                            hasGeneratedLongSignal = true;
-                        }
-                    }
-                    
-                    // 4. Signal on first occurrence of conditions after convergence
-                    if (longConvergenceBar > 0 && !hasGeneratedLongSignal && 
-                        CurrentBar > longConvergenceBar && (CurrentBar - longConvergenceBar) <= 15)
-                    {
-                        // Calculate divergence since convergence point
-                        double diPlusAtConv = DiPlus[CurrentBar - longConvergenceBar];
-                        double diMinusAtConv = DiMinus[CurrentBar - longConvergenceBar];
-                        
-                        // Check for sufficient divergence after convergence
-                        double diPlusDiff = DiPlus[0] - diPlusAtConv;
-                        double diMinusDiff = diMinusAtConv - DiMinus[0];
-                        bool enoughDivergence = (diPlusDiff + diMinusDiff) >= DIDivergencePoints;
-                        
-                        // Signal on first sufficient divergence after convergence
-                        if (enoughDivergence && 
-                            DiPlus[0] > DiMinus[0] && 
-                            buyVolumeEMA[0] > sellVolumeEMA[0])
-                        {
-                            // Generate first signal after convergence
-                            Draw.TriangleUp(this, LongFilterOn + CurrentBar, true, 0, 
-                                Low[0] - Signal_Offset * TickSize, Brushes.DodgerBlue);
-                            hasGeneratedLongSignal = true;
-                        }
-                    }
-                    
-                    // === SHORT SIGNAL DETECTION AND TRACKING ===
-                    
-                    // 1. Check for new crossover (DI- crosses above DI+)
-                    if (CrossAbove(DiMinus, DiPlus, 1))
-                    {
-                        // Reset tracking for a new potential signal
-                        shortCrossoverBar = CurrentBar;
-                        hasGeneratedShortSignal = false;
-                    }
-                    
-                    // 2. Check for convergence pattern (without crossover)
-                    if (DiMinus[0] > DiPlus[0]) // DI- must be above DI+
-                    {
-                        double currentDiff = DiMinus[0] - DiPlus[0];
-                        double prevDiff = DiMinus[1] - DiPlus[1];
-                        
-                        // Find when lines have converged and now start diverging
-                        if (currentDiff > prevDiff && prevDiff <= DIConvergenceThreshold)
-                        {
-                            // Found a new convergence point where lines start diverging again
-                            shortConvergenceBar = CurrentBar;
-                            hasGeneratedShortSignal = false;
-                        }
-                    }
-                    
-                    // 3. Signal on first occurrence of conditions after crossover
-                    if (shortCrossoverBar > 0 && !hasGeneratedShortSignal && 
-                        CurrentBar > shortCrossoverBar && (CurrentBar - shortCrossoverBar) <= 15)
-                    {
-                        // Get values at crossover
-                        double diPlusAtCross = DiPlus[CurrentBar - shortCrossoverBar];
-                        double diMinusAtCross = DiMinus[CurrentBar - shortCrossoverBar];
-                        
-                        // Check for divergence and volume condition
-                        double diMinusDiff = DiMinus[0] - diMinusAtCross;
-                        double diPlusDiff = diPlusAtCross - DiPlus[0];
-                        
-                        // First time both conditions are met after a crossover
-                        if (diMinusDiff >= DIDivergencePoints && 
-                            diPlusDiff >= DIDivergencePoints && 
-                            DiMinus[0] > DiPlus[0] &&
-                            sellVolumeEMA[0] > buyVolumeEMA[0])
-                        {
-                            // Generate first signal after crossover
-                            Draw.TriangleDown(this, ShortFilterOn + CurrentBar, true, 0, 
-                                High[0] + Signal_Offset * TickSize, Brushes.Goldenrod);
-                            hasGeneratedShortSignal = true;
-                        }
-                    }
-                    
-                    // 4. Signal on first occurrence of conditions after convergence
-                    if (shortConvergenceBar > 0 && !hasGeneratedShortSignal && 
-                        CurrentBar > shortConvergenceBar && (CurrentBar - shortConvergenceBar) <= 15)
-                    {
-                        // Calculate divergence since convergence point
-                        double diPlusAtConv = DiPlus[CurrentBar - shortConvergenceBar];
-                        double diMinusAtConv = DiMinus[CurrentBar - shortConvergenceBar];
-                        
-                        // Check for sufficient divergence after convergence
-                        double diMinusDiff = DiMinus[0] - diMinusAtConv;
-                        double diPlusDiff = diPlusAtConv - DiPlus[0];
-                        bool enoughDivergence = (diMinusDiff + diPlusDiff) >= DIDivergencePoints;
-                        
-                        // Signal on first sufficient divergence after convergence
-                        if (enoughDivergence && 
-                            DiMinus[0] > DiPlus[0] && 
-                            sellVolumeEMA[0] > buyVolumeEMA[0])
-                        {
-                            // Generate first signal after convergence
-                            Draw.TriangleDown(this, ShortFilterOn + CurrentBar, true, 0, 
-                                High[0] + Signal_Offset * TickSize, Brushes.Goldenrod);
-                            hasGeneratedShortSignal = true;
-                        }
-                    }
-                }
+               // Inside the OnBarUpdate method, replace the DI Divergence Signal Logic section with this:
+
+// Inside the OnBarUpdate method, replace the DI Divergence Signal Logic section with this:
+
+// DI Divergence Signal Logic
+if (DIDiv && ADXPlot[0] >= TradeThresholdDefault)
+{
+    // === LONG SIGNAL DETECTION AND TRACKING ===
+    
+    // 1. Check for new crossover (DI+ crosses above DI-)
+    if (CrossAbove(DiPlus, DiMinus, 1))
+    {
+        // Reset tracking for a new potential signal
+        longCrossoverBar = CurrentBar;
+        hasGeneratedLongSignal = false;
+        
+        // If DIDivergencePoints is 0, generate signal immediately like the original DMX
+        // but with the additional EMA check for 2 consecutive bars
+        if (DIDivergencePoints == 0)
+        {
+            // Check if conditions match DMX indicator with additional EMA rule
+            // Ensure buy volume EMA is greater than sell volume EMA for 2 consecutive bars
+            bool emaConditionMet = buyVolumeEMA[0] > sellVolumeEMA[0] && 
+                                  buyVolumeEMA[1] > sellVolumeEMA[1];
+                              
+            if (CurrentBar >= 5 && DiPlus[5] < DiMinus[5] && emaConditionMet)
+            {
+                Draw.TriangleUp(this, LongFilterOn + CurrentBar, true, 0, 
+                    Low[0] - Signal_Offset * TickSize, Brushes.DodgerBlue);
+                hasGeneratedLongSignal = true;
+            }
+            // Alternative: just generate signal on any crossover with EMA condition
+            else if (emaConditionMet)
+            {
+                Draw.TriangleUp(this, LongFilterOn + CurrentBar, true, 0, 
+                    Low[0] - Signal_Offset * TickSize, Brushes.DodgerBlue);
+                hasGeneratedLongSignal = true;
+            }
+        }
+    }
+    
+    // 2. Check for convergence pattern (without crossover)
+    if (DiPlus[0] > DiMinus[0]) // DI+ must be above DI-
+    {
+        double currentDiff = DiPlus[0] - DiMinus[0];
+        double prevDiff = DiPlus[1] - DiMinus[1];
+        
+        // Find when lines have converged and now start diverging
+        if (currentDiff > prevDiff && prevDiff <= DIConvergenceThreshold)
+        {
+            // Found a new convergence point where lines start diverging again
+            longConvergenceBar = CurrentBar;
+            hasGeneratedLongSignal = false;
+        }
+    }
+    
+    // 3. Signal on first occurrence of conditions after crossover (when DIDivergencePoints > 0)
+    if (DIDivergencePoints > 0 && longCrossoverBar > 0 && !hasGeneratedLongSignal && 
+        CurrentBar > longCrossoverBar && (CurrentBar - longCrossoverBar) <= 15)
+    {
+        // Get values at crossover
+        double diPlusAtCross = DiPlus[CurrentBar - longCrossoverBar];
+        double diMinusAtCross = DiMinus[CurrentBar - longCrossoverBar];
+        
+        // Check for divergence and volume condition
+        double diPlusDiff = DiPlus[0] - diPlusAtCross;
+        double diMinusDiff = diMinusAtCross - DiMinus[0];
+        
+        // First time both conditions are met after a crossover
+        // Added check for EMA condition for 2 consecutive bars
+        bool longEmaConditionMet = buyVolumeEMA[0] > sellVolumeEMA[0] && 
+                                  buyVolumeEMA[1] > sellVolumeEMA[1];
+                                  
+        if (diPlusDiff >= DIDivergencePoints && 
+            diMinusDiff >= DIDivergencePoints && 
+            DiPlus[0] > DiMinus[0] &&
+            longEmaConditionMet)
+        {
+            // Generate first signal after crossover
+            Draw.TriangleUp(this, LongFilterOn + CurrentBar, true, 0, 
+                Low[0] - Signal_Offset * TickSize, Brushes.DodgerBlue);
+            hasGeneratedLongSignal = true;
+        }
+    }
+    
+    // 4. Signal on first occurrence of conditions after convergence (when DIDivergencePoints > 0)
+    if (DIDivergencePoints > 0 && longConvergenceBar > 0 && !hasGeneratedLongSignal && 
+        CurrentBar > longConvergenceBar && (CurrentBar - longConvergenceBar) <= 15)
+    {
+        // Calculate divergence since convergence point
+        double diPlusAtConv = DiPlus[CurrentBar - longConvergenceBar];
+        double diMinusAtConv = DiMinus[CurrentBar - longConvergenceBar];
+        
+        // Check for sufficient divergence after convergence
+        double diPlusDiff = DiPlus[0] - diPlusAtConv;
+        double diMinusDiff = diMinusAtConv - DiMinus[0];
+        bool enoughDivergence = (diPlusDiff + diMinusDiff) >= DIDivergencePoints;
+        
+        // Signal on first sufficient divergence after convergence
+        // Added check for EMA condition for 2 consecutive bars
+        bool longConvergenceEmaConditionMet = buyVolumeEMA[0] > sellVolumeEMA[0] && 
+                                             buyVolumeEMA[1] > sellVolumeEMA[1];
+                                             
+        if (enoughDivergence && 
+            DiPlus[0] > DiMinus[0] && 
+            longConvergenceEmaConditionMet)
+        {
+            // Generate first signal after convergence
+            Draw.TriangleUp(this, LongFilterOn + CurrentBar, true, 0, 
+                Low[0] - Signal_Offset * TickSize, Brushes.DodgerBlue);
+            hasGeneratedLongSignal = true;
+        }
+    }
+    
+    // === SHORT SIGNAL DETECTION AND TRACKING ===
+    
+    // 1. Check for new crossover (DI- crosses above DI+)
+    if (CrossAbove(DiMinus, DiPlus, 1))
+    {
+        // Reset tracking for a new potential signal
+        shortCrossoverBar = CurrentBar;
+        hasGeneratedShortSignal = false;
+        
+        // If DIDivergencePoints is 0, generate signal immediately like the original DMX
+        // but with the additional EMA check for 2 consecutive bars
+        if (DIDivergencePoints == 0)
+        {
+            // Check if conditions match DMX indicator with additional EMA rule
+            // Ensure sell volume EMA is greater than buy volume EMA for 2 consecutive bars
+            bool emaConditionMet = sellVolumeEMA[0] > buyVolumeEMA[0] && 
+                                  sellVolumeEMA[1] > buyVolumeEMA[1];
+                              
+            if (CurrentBar >= 5 && DiMinus[5] < DiPlus[5] && emaConditionMet)
+            {
+                Draw.TriangleDown(this, ShortFilterOn + CurrentBar, true, 0, 
+                    High[0] + Signal_Offset * TickSize, Brushes.DodgerBlue);
+                hasGeneratedShortSignal = true;
+            }
+            // Alternative: just generate signal on any crossover with EMA condition
+            else if (emaConditionMet)
+            {
+                Draw.TriangleDown(this, ShortFilterOn + CurrentBar, true, 0, 
+                    High[0] + Signal_Offset * TickSize, Brushes.DodgerBlue);
+                hasGeneratedShortSignal = true;
+            }
+        }
+    }
+    
+    // 2. Check for convergence pattern (without crossover)
+    if (DiMinus[0] > DiPlus[0]) // DI- must be above DI+
+    {
+        double currentDiff = DiMinus[0] - DiPlus[0];
+        double prevDiff = DiMinus[1] - DiPlus[1];
+        
+        // Find when lines have converged and now start diverging
+        if (currentDiff > prevDiff && prevDiff <= DIConvergenceThreshold)
+        {
+            // Found a new convergence point where lines start diverging again
+            shortConvergenceBar = CurrentBar;
+            hasGeneratedShortSignal = false;
+        }
+    }
+    
+    // 3. Signal on first occurrence of conditions after crossover (when DIDivergencePoints > 0)
+    if (DIDivergencePoints > 0 && shortCrossoverBar > 0 && !hasGeneratedShortSignal && 
+        CurrentBar > shortCrossoverBar && (CurrentBar - shortCrossoverBar) <= 15)
+    {
+        // Get values at crossover
+        double diPlusAtCross = DiPlus[CurrentBar - shortCrossoverBar];
+        double diMinusAtCross = DiMinus[CurrentBar - shortCrossoverBar];
+        
+        // Check for divergence and volume condition
+        double diMinusDiff = DiMinus[0] - diMinusAtCross;
+        double diPlusDiff = diPlusAtCross - DiPlus[0];
+        
+        // First time both conditions are met after a crossover
+        // Added check for EMA condition for 2 consecutive bars
+        bool shortEmaConditionMet = sellVolumeEMA[0] > buyVolumeEMA[0] && 
+                                   sellVolumeEMA[1] > buyVolumeEMA[1];
+                                   
+        if (diMinusDiff >= DIDivergencePoints && 
+            diPlusDiff >= DIDivergencePoints && 
+            DiMinus[0] > DiPlus[0] &&
+            shortEmaConditionMet)
+        {
+            // Generate first signal after crossover
+            Draw.TriangleDown(this, ShortFilterOn + CurrentBar, true, 0, 
+                High[0] + Signal_Offset * TickSize, Brushes.DodgerBlue);
+            hasGeneratedShortSignal = true;
+        }
+    }
+    
+    // 4. Signal on first occurrence of conditions after convergence (when DIDivergencePoints > 0)
+    if (DIDivergencePoints > 0 && shortConvergenceBar > 0 && !hasGeneratedShortSignal && 
+        CurrentBar > shortConvergenceBar && (CurrentBar - shortConvergenceBar) <= 15)
+    {
+        // Calculate divergence since convergence point
+        double diPlusAtConv = DiPlus[CurrentBar - shortConvergenceBar];
+        double diMinusAtConv = DiMinus[CurrentBar - shortConvergenceBar];
+        
+        // Check for sufficient divergence after convergence
+        double diMinusDiff = DiMinus[0] - diMinusAtConv;
+        double diPlusDiff = diPlusAtConv - DiPlus[0];
+        bool enoughDivergence = (diMinusDiff + diPlusDiff) >= DIDivergencePoints;
+        
+        // Signal on first sufficient divergence after convergence
+        // Added check for EMA condition for 2 consecutive bars
+        bool shortConvergenceEmaConditionMet = sellVolumeEMA[0] > buyVolumeEMA[0] && 
+                                              sellVolumeEMA[1] > buyVolumeEMA[1];
+                                              
+        if (enoughDivergence && 
+            DiMinus[0] > DiPlus[0] && 
+            shortConvergenceEmaConditionMet)
+        {
+            // Generate first signal after convergence
+            Draw.TriangleDown(this, ShortFilterOn + CurrentBar, true, 0, 
+                High[0] + Signal_Offset * TickSize, Brushes.DodgerBlue);
+            hasGeneratedShortSignal = true;
+        }
+    }
+}
 
                 // ADX Rising Signal Logic
                 if (ADXRising && ADXPlot[0] >= TradeThresholdDefault)
@@ -390,11 +458,11 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                         {
                             if (Close[0] > Open[0]) // Long signal
                             {
-                                Draw.Diamond(this, LongFilterOn + CurrentBar, true, 0, Low[0] - Signal_Offset * TickSize, Brushes.Goldenrod);
+                                Draw.Diamond(this, LongFilterOn + CurrentBar, true, 0, Low[0] - Signal_Offset * TickSize, Brushes.DodgerBlue);
                             }
                             else if (Close[0] < Open[0]) // Short signal
                             {
-                                Draw.Diamond(this, ShortFilterOn + CurrentBar, true, 0, High[0] + Signal_Offset * TickSize, Brushes.Goldenrod);
+                                Draw.Diamond(this, ShortFilterOn + CurrentBar, true, 0, High[0] + Signal_Offset * TickSize, Brushes.DodgerBlue);
                             }
                             adxRisingActive = true;  // Activate ADX Rising state
                         }
