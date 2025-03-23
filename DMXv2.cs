@@ -209,13 +209,13 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                     // Long Signal: ADX crosses above the Lower Threshold and price is increasing
                     if (CrossAbove(ADXPlot, ADXCrossover, 1) && Close[0] > Close[1])
                     {
-                        Draw.ArrowUp(this, LongFilterOn + CurrentBar, true, 0, Low[0] - Signal_Offset * TickSize, Brushes.Goldenrod);
+                        Draw.ArrowUp(this, LongFilterOn + CurrentBar, true, 0, Low[0] - Signal_Offset * TickSize, Brushes.DodgerBlue);
                     }
 
                     // Short Signal: ADX crosses above the Lower Threshold and price is decreasing
                     if (CrossAbove(ADXPlot, ADXCrossover, 1) && Close[0] < Close[1])
                     {
-                        Draw.ArrowDown(this, ShortFilterOn + CurrentBar, true, 0, High[0] + Signal_Offset * TickSize, Brushes.Goldenrod);
+                        Draw.ArrowDown(this, ShortFilterOn + CurrentBar, true, 0, High[0] + Signal_Offset * TickSize, Brushes.DodgerBlue);
                     }
                 }
 
@@ -267,7 +267,7 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                         {
                             // Generate first signal after crossover
                             Draw.TriangleUp(this, LongFilterOn + CurrentBar, true, 0, 
-                                Low[0] - Signal_Offset * TickSize, Brushes.Goldenrod);
+                                Low[0] - Signal_Offset * TickSize, Brushes.DodgerBlue);
                             hasGeneratedLongSignal = true;
                         }
                     }
@@ -292,7 +292,7 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                         {
                             // Generate first signal after convergence
                             Draw.TriangleUp(this, LongFilterOn + CurrentBar, true, 0, 
-                                Low[0] - Signal_Offset * TickSize, Brushes.Goldenrod);
+                                Low[0] - Signal_Offset * TickSize, Brushes.DodgerBlue);
                             hasGeneratedLongSignal = true;
                         }
                     }
