@@ -52,10 +52,10 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
         [Range(8, 24)]
         [Display(Name = "Font Size", Description = "Size of the timer text", Order = 4, GroupName = "Text Appearance")]
         public int FontSize { get; set; }
-        
-        [NinjaScriptProperty]
-        [Display(Name = "Text Color", Description = "Color of the timer text", Order = 5, GroupName = "Text Appearance")]
-        public Brush TextColor { get; set; }
+		
+		[NinjaScriptProperty]
+		[Display(Name = "Text Color", Description = "Color of the timer text", Order = 5, GroupName = "Text Appearance")]
+		public Brush TextColor { get; set; }
         
         [NinjaScriptProperty]
         [Display(Name = "Background Opacity", Description = "Opacity of the text background (0-255, 0 = transparent)", Order = 6, GroupName = "Text Appearance")]
@@ -77,7 +77,7 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                 DrawVerticalGridLines       = true;
                 PaintPriceMarkers           = true;
                 ScaleJustification          = NinjaTrader.Gui.Chart.ScaleJustification.Right;
-                IsSuspendedWhileInactive    = true;
+                IsSuspendedWhileInactive    = false;
                 
                 // Default parameter values
                 LookbackPeriod              = 20;
@@ -90,7 +90,7 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                 // Indicator plot properties - setting opacity to 0 to make it invisible
                 AddPlot(new Stroke(Brushes.Transparent, 0), PlotStyle.Line, "AvgTimeSeconds");
             }
-            else if (State == State.Configure)
+           else if (State == State.Configure)
             {
                 // Check for NinzaRenko, UniRenko and other custom Renko bar types
                 // Using case-insensitive comparison for better detection
@@ -104,9 +104,8 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                     Draw.TextFixed(this, "Error", "This indicator is designed for NinzaRenko or UniRenko bars", TextPosition.BottomRight);
                     return;
                 }
-            }
         }
-
+	}
         protected override void OnBarUpdate()
         {
             // Skip the first bar as we need two bars to calculate time difference
@@ -173,7 +172,7 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                 // Draw text with user-defined properties
                 Draw.TextFixed(this, "TimeTextPricePanel", timeText, LabelPosition, 
                     TextColor, new SimpleFont("Arial", FontSize), 
-                    null, backgroundBrush, 90);
+                    null, backgroundBrush, 100);
             }
         }
         
