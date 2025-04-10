@@ -44,12 +44,13 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
 		private int lastEntrySignalBar = -1;
 		private int lastExitSignalBar = -1;
 		private int entryConditionBarIndex = -1; // Tracks the bar where entry condition was first met
+        private int exitConditionBarIndex = -1; // Tracks the bar where exit condition was first met
 
         protected override void OnStateChange()
 {
     if (State == State.SetDefaults)
     {
-        Description = @"Enter the description for your new custom Indicator here.";
+        Description = @"Williams Vix Fix V3 with dual reset logic";
         Name = "WilliamsVixFixV3";
         Calculate = Calculate.OnBarClose;
         IsOverlay = false;
@@ -89,7 +90,7 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
         LongOff = "LongOff";
         // ShortOff = "ShortOff";
         LongExitMark = .3;
-		ExitXColor = Brushes.Black;       // Default black for exit X's
+		ExitXColor = Brushes.White;       // Changed to white for testing (was Black)
 
         Signal_Offset = 5;
     }
@@ -113,6 +114,7 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
         lastEntrySignalBar = -1;
         lastExitSignalBar = -1;
         entryConditionBarIndex = -1;
+        exitConditionBarIndex = -1;
     }
 }
 protected override void OnBarUpdate()
@@ -183,17 +185,36 @@ protected override void OnBarUpdate()
         BarBrushes[0] = null; // Default chart color
     }
     
-    // ==================== NEW TRADE SIGNALS LOGIC ====================
+    // ==================== MODIFIED TRADE SIGNALS LOGIC ====================
     
-    // Track if we've had a bearish bar to reset entry condition
+    // Track if we've had a bearish bar 
     bool isBearishBar = Close[0] < Open[0];
     
-    // Long Entry Signal Logic
+    // Check for exit condition based on WVF value
+    bool isExitConditionMet = wvfSeries[0] >= LongExitMark;
+    
+    // Long Entry Signal Logic 
     // Check for meeting the entry condition (WVF <= LongEntryMark)
     if (ShowEntrySignal && wvfSeries[0] <= LongEntryMark)
     {
-        // Check if this is the first occurrence or if we had a bearish bar to reset
-        if (!hasGeneratedEntrySignal || lastBearishBar > lastEntrySignalBar)
+        // MODIFIED: Different reset logic based on whether exit signals are shown
+        bool canGenerateNewEntrySignal = false;
+        
+        if (ShowExitSignal)
+        {
+            // When exit signals enabled: Reset based on exit condition (LongExitMark)
+            canGenerateNewEntrySignal = !hasGeneratedEntrySignal || 
+                                       (hasGeneratedExitSignal && lastExitSignalBar > lastEntrySignalBar);
+        }
+        else
+        {
+            // When exit signals disabled: Reset based on bearish bars
+            canGenerateNewEntrySignal = !hasGeneratedEntrySignal || 
+                                       (lastBearishBar > lastEntrySignalBar);
+        }
+        
+        // Check if we can generate a new entry signal
+        if (canGenerateNewEntrySignal)
         {
             // Store the bar where the condition was first met
             if (entryConditionBarIndex == -1)
@@ -205,7 +226,7 @@ protected override void OnBarUpdate()
             if (CurrentBar >= entryConditionBarIndex + ConfirmationBars)
             {
                 // Draw the yellow up arrow for long entry with the LongOn text as identifier
-                Draw.ArrowUp(this, LongOn + CurrentBar, true, 0, 
+                Draw.ArrowUp(this, LongOn + CurrentBar.ToString(), true, 0, 
                             Low[0] - Signal_Offset * TickSize, EntryArrowColor);
                 
                 // Mark that we've generated an entry signal
@@ -221,22 +242,56 @@ protected override void OnBarUpdate()
         entryConditionBarIndex = -1;
     }
     
-    // Track bearish bars to know when to reset entry condition
-    if (isBearishBar)
+    // MODIFIED: Exit Signal Logic based on mode
+    if (ShowExitSignal)
     {
-        lastBearishBar = CurrentBar;
-        
-        // Draw exit signal on first bearish bar after an entry
-        if (hasGeneratedEntrySignal && CurrentBar > lastEntrySignalBar && 
-            (!hasGeneratedExitSignal || lastEntrySignalBar > lastExitSignalBar))
+        // Mode 1: Use Long Exit Mark when exit signals are enabled
+        if (isExitConditionMet)
         {
-            // Draw black X for exit
-            Draw.Text(this, LongOff + CurrentBar.ToString(), "×", 0, 
-                      High[0] + (Signal_Offset * 5) * TickSize, ExitXColor);
+            if (hasGeneratedEntrySignal && CurrentBar > lastEntrySignalBar && 
+                (!hasGeneratedExitSignal || lastEntrySignalBar > lastExitSignalBar))
+            {
+                // Store the bar where the exit condition was first met
+                if (exitConditionBarIndex == -1)
+                {
+                    exitConditionBarIndex = CurrentBar;
+                }
                 
-            // Mark that we've generated an exit signal
-            hasGeneratedExitSignal = true;
-            lastExitSignalBar = CurrentBar;
+                // Draw white X for exit
+                Draw.Text(this, LongOff + CurrentBar.ToString(), "×", 0, 
+                          High[0] + (Signal_Offset * 5) * TickSize, ExitXColor);
+                    
+                // Mark that we've generated an exit signal
+                hasGeneratedExitSignal = true;
+                lastExitSignalBar = CurrentBar;
+                exitConditionBarIndex = -1; // Reset the condition bar index
+            }
+        }
+        else
+        {
+            // Reset exit condition bar index if we no longer meet the condition
+            exitConditionBarIndex = -1;
+        }
+    }
+    else
+    {
+        // Mode 2: Use bearish bars for exit when exit signals are disabled
+        if (isBearishBar)
+        {
+            lastBearishBar = CurrentBar;
+            
+            // Draw exit signal on first bearish bar after an entry
+            if (hasGeneratedEntrySignal && CurrentBar > lastEntrySignalBar && 
+                (!hasGeneratedExitSignal || lastEntrySignalBar > lastExitSignalBar))
+            {
+                // Draw white X for exit 
+                Draw.Text(this, LongOff + CurrentBar.ToString(), "×", 0, 
+                          High[0] + (Signal_Offset * 5) * TickSize, ExitXColor);
+                    
+                // Mark that we've generated an exit signal
+                hasGeneratedExitSignal = true;
+                lastExitSignalBar = CurrentBar;
+            }
         }
     }
 }
@@ -274,7 +329,8 @@ protected override void OnBarUpdate()
         public int ConfirmationBars { get; set; }
 
         [NinjaScriptProperty]
-        [Display(Name = "Show Exit Signals", GroupName = "Signal Settings", Order = 6)]
+        [Display(Name = "Show Exit Signals", GroupName = "Signal Settings", Order = 6,
+                Description = "When enabled, uses Long Exit Mark for resetting signals instead of bearish bars")]
         public bool ShowExitSignal { get; set; }
 
         [NinjaScriptProperty]
@@ -286,7 +342,8 @@ protected override void OnBarUpdate()
        // public string ShortOff { get; set; }
 		
 		[NinjaScriptProperty]
-        [Display(Name = "Long Exit Mark", GroupName = "Signal Settings", Order = 8)]
+        [Display(Name = "Long Exit Mark", GroupName = "Signal Settings", Order = 8,
+                Description = "WVF value that triggers exit signals (when Show Exit Signals is enabled)")]
         public double LongExitMark { get; set; }
 		
 		[NinjaScriptProperty]
