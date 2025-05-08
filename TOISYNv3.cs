@@ -101,6 +101,7 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
 	        
 	        // Set ZLMACD default value
 	        ZLMACDMultiplier = 0.5;
+			UseZLMACDFilter = true;
 	        
 	        // Add debug details
 	        ShowDebugInfo = false;
@@ -223,7 +224,7 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
 					double normalizedMomentum = macdMomentum / atr;
 					
 					// Dynamic threshold based on ATR
-					bool sufficientMomentum = normalizedMomentum >= zlMacdMultiplier;
+					bool sufficientMomentum = !UseZLMACDFilter || normalizedMomentum >= zlMacdMultiplier;
 					
 					// Apply lockout period filter
 					bool longSignalAllowed = CurrentBar - lastLongSignalBar > signalLockoutPeriod;
@@ -232,7 +233,7 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
 					// For debugging
 					if (ShowDebugInfo && IsFirstTickOfBar)
 					{
-					    Print($"ZLMACD Filter: Momentum={normalizedMomentum:F6}, Threshold={zlMacdMultiplier:F6}, " +
+					    Print($"ZLMACD Filter: Enabled={UseZLMACDFilter}, Momentum={normalizedMomentum:F6}, Threshold={zlMacdMultiplier:F6}, " +
 					          $"Sufficient={sufficientMomentum}, LongAllowed={longSignalAllowed}, ShortAllowed={shortSignalAllowed}");
 					}
                     
@@ -473,6 +474,7 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
 					        sb.AppendLine($"  Combined: Long={longSignal}, Short={shortSignal}");
 					        sb.AppendLine($"  Momentum: {normalizedMomentum:F6}, Sufficient={sufficientMomentum}");
 					        sb.AppendLine($"  Lockout: LongAllowed={longSignalAllowed}, ShortAllowed={shortSignalAllowed}");
+							sb.AppendLine($"  ZLMACD Filter: Enabled={UseZLMACDFilter}, Momentum={normalizedMomentum:F6}, Sufficient={sufficientMomentum}");
 					        Print(sb.ToString());
 					    }
 					    
@@ -557,12 +559,12 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
 					        
 					        if (IsFirstTickOfBar && ShowDebugInfo && (!sufficientMomentum || !longSignalAllowed))
 					        {
-					            string reasons = new List<string>();
-					            if (!sufficientMomentum) reasons.Add("insufficient momentum");
-					            if (!longSignalAllowed) reasons.Add("in lockout period");
-					            
-					            Print($"Long conditions met at {Time[0]}, but {string.Join(" and ", reasons)} - no signal drawn");
-					        }
+					        List<string> reasonsList = new List<string>();
+							if (UseZLMACDFilter && !sufficientMomentum) reasonsList.Add("insufficient momentum");
+							if (!longSignalAllowed) reasonsList.Add("in lockout period");
+							            
+							Print($"Long conditions met at {Time[0]}, but {string.Join(" and ", reasonsList)} - no signal drawn");
+												        }
 					    }
 					    else if (shortSignal && inShortTrend)
 					    {
@@ -571,11 +573,11 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
 					        
 					        if (IsFirstTickOfBar && ShowDebugInfo && (!sufficientMomentum || !shortSignalAllowed))
 					        {
-					            string reasons = new List<string>();
-					            if (!sufficientMomentum) reasons.Add("insufficient momentum");
-					            if (!shortSignalAllowed) reasons.Add("in lockout period");
-					            
-					            Print($"Short conditions met at {Time[0]}, but {string.Join(" and ", reasons)} - no signal drawn");
+					        List<string> reasonsList = new List<string>();
+							if (UseZLMACDFilter && !sufficientMomentum) reasonsList.Add("insufficient momentum");
+							if (!shortSignalAllowed) reasonsList.Add("in lockout period");
+							            
+							Print($"Short conditions met at {Time[0]}, but {string.Join(" and ", reasonsList)} - no signal drawn");
 					        }
 					    }
 					    else
@@ -832,13 +834,17 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
         [Display(Name = "Use WAE", Description = "Use Waddah Attar Explosion for signal generation", Order = 4, GroupName = "Indicator Selection")]
         public bool UseWAE { get; set; }
 		
+		[NinjaScriptProperty]
+		[Display(Name = "Use ZLMACD Filter", Description = "Enable ZLMACD momentum filter for signal generation", Order = 5, GroupName = "Indicator Selection")]
+		public bool UseZLMACDFilter { get; set; }
+		
 		[Range(0.1, 2.0)]
 		[NinjaScriptProperty]
-		[Display(Name = "ZLMACD Multiplier", Description = "Multiplier for ZLMACD momentum threshold", Order = 5, GroupName = "Indicator Selection")]
+		[Display(Name = "ZLMACD Multiplier", Description = "Multiplier for ZLMACD momentum threshold", Order = 6, GroupName = "Indicator Selection")]
 		public double ZLMACDMultiplier { get; set; }
         
         [NinjaScriptProperty]
-        [Display(Name = "Show Debug Info", Description = "Show debugging information", Order = 6, GroupName = "Indicator Selection")]
+        [Display(Name = "Show Debug Info", Description = "Show debugging information", Order = 7, GroupName = "Indicator Selection")]
         public bool ShowDebugInfo { get; set; }
         
         [XmlIgnore]
@@ -900,18 +906,18 @@ namespace NinjaTrader.NinjaScript.Indicators
 	public partial class Indicator : NinjaTrader.Gui.NinjaScript.IndicatorRenderBase
 	{
 		private Myindicators.TOISYNv3[] cacheTOISYNv3;
-		public Myindicators.TOISYNv3 TOISYNv3(int wAESensitivity, bool showLabels, bool useTFC, bool useHADots, bool useLRSI, bool useWAE, double zLMACDMultiplier, bool showDebugInfo, Brush longArrowColor, Brush shortArrowColor, bool use5Min, bool use15Min, bool use30Min, bool use1Hour, bool use4Hour, bool use1Day)
+		public Myindicators.TOISYNv3 TOISYNv3(int wAESensitivity, bool showLabels, bool useTFC, bool useHADots, bool useLRSI, bool useWAE, bool useZLMACDFilter, double zLMACDMultiplier, bool showDebugInfo, Brush longArrowColor, Brush shortArrowColor, bool use5Min, bool use15Min, bool use30Min, bool use1Hour, bool use4Hour, bool use1Day)
 		{
-			return TOISYNv3(Input, wAESensitivity, showLabels, useTFC, useHADots, useLRSI, useWAE, zLMACDMultiplier, showDebugInfo, longArrowColor, shortArrowColor, use5Min, use15Min, use30Min, use1Hour, use4Hour, use1Day);
+			return TOISYNv3(Input, wAESensitivity, showLabels, useTFC, useHADots, useLRSI, useWAE, useZLMACDFilter, zLMACDMultiplier, showDebugInfo, longArrowColor, shortArrowColor, use5Min, use15Min, use30Min, use1Hour, use4Hour, use1Day);
 		}
 
-		public Myindicators.TOISYNv3 TOISYNv3(ISeries<double> input, int wAESensitivity, bool showLabels, bool useTFC, bool useHADots, bool useLRSI, bool useWAE, double zLMACDMultiplier, bool showDebugInfo, Brush longArrowColor, Brush shortArrowColor, bool use5Min, bool use15Min, bool use30Min, bool use1Hour, bool use4Hour, bool use1Day)
+		public Myindicators.TOISYNv3 TOISYNv3(ISeries<double> input, int wAESensitivity, bool showLabels, bool useTFC, bool useHADots, bool useLRSI, bool useWAE, bool useZLMACDFilter, double zLMACDMultiplier, bool showDebugInfo, Brush longArrowColor, Brush shortArrowColor, bool use5Min, bool use15Min, bool use30Min, bool use1Hour, bool use4Hour, bool use1Day)
 		{
 			if (cacheTOISYNv3 != null)
 				for (int idx = 0; idx < cacheTOISYNv3.Length; idx++)
-					if (cacheTOISYNv3[idx] != null && cacheTOISYNv3[idx].WAESensitivity == wAESensitivity && cacheTOISYNv3[idx].ShowLabels == showLabels && cacheTOISYNv3[idx].UseTFC == useTFC && cacheTOISYNv3[idx].UseHADots == useHADots && cacheTOISYNv3[idx].UseLRSI == useLRSI && cacheTOISYNv3[idx].UseWAE == useWAE && cacheTOISYNv3[idx].ZLMACDMultiplier == zLMACDMultiplier && cacheTOISYNv3[idx].ShowDebugInfo == showDebugInfo && cacheTOISYNv3[idx].LongArrowColor == longArrowColor && cacheTOISYNv3[idx].ShortArrowColor == shortArrowColor && cacheTOISYNv3[idx].Use5Min == use5Min && cacheTOISYNv3[idx].Use15Min == use15Min && cacheTOISYNv3[idx].Use30Min == use30Min && cacheTOISYNv3[idx].Use1Hour == use1Hour && cacheTOISYNv3[idx].Use4Hour == use4Hour && cacheTOISYNv3[idx].Use1Day == use1Day && cacheTOISYNv3[idx].EqualsInput(input))
+					if (cacheTOISYNv3[idx] != null && cacheTOISYNv3[idx].WAESensitivity == wAESensitivity && cacheTOISYNv3[idx].ShowLabels == showLabels && cacheTOISYNv3[idx].UseTFC == useTFC && cacheTOISYNv3[idx].UseHADots == useHADots && cacheTOISYNv3[idx].UseLRSI == useLRSI && cacheTOISYNv3[idx].UseWAE == useWAE && cacheTOISYNv3[idx].UseZLMACDFilter == useZLMACDFilter && cacheTOISYNv3[idx].ZLMACDMultiplier == zLMACDMultiplier && cacheTOISYNv3[idx].ShowDebugInfo == showDebugInfo && cacheTOISYNv3[idx].LongArrowColor == longArrowColor && cacheTOISYNv3[idx].ShortArrowColor == shortArrowColor && cacheTOISYNv3[idx].Use5Min == use5Min && cacheTOISYNv3[idx].Use15Min == use15Min && cacheTOISYNv3[idx].Use30Min == use30Min && cacheTOISYNv3[idx].Use1Hour == use1Hour && cacheTOISYNv3[idx].Use4Hour == use4Hour && cacheTOISYNv3[idx].Use1Day == use1Day && cacheTOISYNv3[idx].EqualsInput(input))
 						return cacheTOISYNv3[idx];
-			return CacheIndicator<Myindicators.TOISYNv3>(new Myindicators.TOISYNv3(){ WAESensitivity = wAESensitivity, ShowLabels = showLabels, UseTFC = useTFC, UseHADots = useHADots, UseLRSI = useLRSI, UseWAE = useWAE, ZLMACDMultiplier = zLMACDMultiplier, ShowDebugInfo = showDebugInfo, LongArrowColor = longArrowColor, ShortArrowColor = shortArrowColor, Use5Min = use5Min, Use15Min = use15Min, Use30Min = use30Min, Use1Hour = use1Hour, Use4Hour = use4Hour, Use1Day = use1Day }, input, ref cacheTOISYNv3);
+			return CacheIndicator<Myindicators.TOISYNv3>(new Myindicators.TOISYNv3(){ WAESensitivity = wAESensitivity, ShowLabels = showLabels, UseTFC = useTFC, UseHADots = useHADots, UseLRSI = useLRSI, UseWAE = useWAE, UseZLMACDFilter = useZLMACDFilter, ZLMACDMultiplier = zLMACDMultiplier, ShowDebugInfo = showDebugInfo, LongArrowColor = longArrowColor, ShortArrowColor = shortArrowColor, Use5Min = use5Min, Use15Min = use15Min, Use30Min = use30Min, Use1Hour = use1Hour, Use4Hour = use4Hour, Use1Day = use1Day }, input, ref cacheTOISYNv3);
 		}
 	}
 }
@@ -920,14 +926,14 @@ namespace NinjaTrader.NinjaScript.MarketAnalyzerColumns
 {
 	public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
 	{
-		public Indicators.Myindicators.TOISYNv3 TOISYNv3(int wAESensitivity, bool showLabels, bool useTFC, bool useHADots, bool useLRSI, bool useWAE, double zLMACDMultiplier, bool showDebugInfo, Brush longArrowColor, Brush shortArrowColor, bool use5Min, bool use15Min, bool use30Min, bool use1Hour, bool use4Hour, bool use1Day)
+		public Indicators.Myindicators.TOISYNv3 TOISYNv3(int wAESensitivity, bool showLabels, bool useTFC, bool useHADots, bool useLRSI, bool useWAE, bool useZLMACDFilter, double zLMACDMultiplier, bool showDebugInfo, Brush longArrowColor, Brush shortArrowColor, bool use5Min, bool use15Min, bool use30Min, bool use1Hour, bool use4Hour, bool use1Day)
 		{
-			return indicator.TOISYNv3(Input, wAESensitivity, showLabels, useTFC, useHADots, useLRSI, useWAE, zLMACDMultiplier, showDebugInfo, longArrowColor, shortArrowColor, use5Min, use15Min, use30Min, use1Hour, use4Hour, use1Day);
+			return indicator.TOISYNv3(Input, wAESensitivity, showLabels, useTFC, useHADots, useLRSI, useWAE, useZLMACDFilter, zLMACDMultiplier, showDebugInfo, longArrowColor, shortArrowColor, use5Min, use15Min, use30Min, use1Hour, use4Hour, use1Day);
 		}
 
-		public Indicators.Myindicators.TOISYNv3 TOISYNv3(ISeries<double> input , int wAESensitivity, bool showLabels, bool useTFC, bool useHADots, bool useLRSI, bool useWAE, double zLMACDMultiplier, bool showDebugInfo, Brush longArrowColor, Brush shortArrowColor, bool use5Min, bool use15Min, bool use30Min, bool use1Hour, bool use4Hour, bool use1Day)
+		public Indicators.Myindicators.TOISYNv3 TOISYNv3(ISeries<double> input , int wAESensitivity, bool showLabels, bool useTFC, bool useHADots, bool useLRSI, bool useWAE, bool useZLMACDFilter, double zLMACDMultiplier, bool showDebugInfo, Brush longArrowColor, Brush shortArrowColor, bool use5Min, bool use15Min, bool use30Min, bool use1Hour, bool use4Hour, bool use1Day)
 		{
-			return indicator.TOISYNv3(input, wAESensitivity, showLabels, useTFC, useHADots, useLRSI, useWAE, zLMACDMultiplier, showDebugInfo, longArrowColor, shortArrowColor, use5Min, use15Min, use30Min, use1Hour, use4Hour, use1Day);
+			return indicator.TOISYNv3(input, wAESensitivity, showLabels, useTFC, useHADots, useLRSI, useWAE, useZLMACDFilter, zLMACDMultiplier, showDebugInfo, longArrowColor, shortArrowColor, use5Min, use15Min, use30Min, use1Hour, use4Hour, use1Day);
 		}
 	}
 }
@@ -936,14 +942,14 @@ namespace NinjaTrader.NinjaScript.Strategies
 {
 	public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
 	{
-		public Indicators.Myindicators.TOISYNv3 TOISYNv3(int wAESensitivity, bool showLabels, bool useTFC, bool useHADots, bool useLRSI, bool useWAE, double zLMACDMultiplier, bool showDebugInfo, Brush longArrowColor, Brush shortArrowColor, bool use5Min, bool use15Min, bool use30Min, bool use1Hour, bool use4Hour, bool use1Day)
+		public Indicators.Myindicators.TOISYNv3 TOISYNv3(int wAESensitivity, bool showLabels, bool useTFC, bool useHADots, bool useLRSI, bool useWAE, bool useZLMACDFilter, double zLMACDMultiplier, bool showDebugInfo, Brush longArrowColor, Brush shortArrowColor, bool use5Min, bool use15Min, bool use30Min, bool use1Hour, bool use4Hour, bool use1Day)
 		{
-			return indicator.TOISYNv3(Input, wAESensitivity, showLabels, useTFC, useHADots, useLRSI, useWAE, zLMACDMultiplier, showDebugInfo, longArrowColor, shortArrowColor, use5Min, use15Min, use30Min, use1Hour, use4Hour, use1Day);
+			return indicator.TOISYNv3(Input, wAESensitivity, showLabels, useTFC, useHADots, useLRSI, useWAE, useZLMACDFilter, zLMACDMultiplier, showDebugInfo, longArrowColor, shortArrowColor, use5Min, use15Min, use30Min, use1Hour, use4Hour, use1Day);
 		}
 
-		public Indicators.Myindicators.TOISYNv3 TOISYNv3(ISeries<double> input , int wAESensitivity, bool showLabels, bool useTFC, bool useHADots, bool useLRSI, bool useWAE, double zLMACDMultiplier, bool showDebugInfo, Brush longArrowColor, Brush shortArrowColor, bool use5Min, bool use15Min, bool use30Min, bool use1Hour, bool use4Hour, bool use1Day)
+		public Indicators.Myindicators.TOISYNv3 TOISYNv3(ISeries<double> input , int wAESensitivity, bool showLabels, bool useTFC, bool useHADots, bool useLRSI, bool useWAE, bool useZLMACDFilter, double zLMACDMultiplier, bool showDebugInfo, Brush longArrowColor, Brush shortArrowColor, bool use5Min, bool use15Min, bool use30Min, bool use1Hour, bool use4Hour, bool use1Day)
 		{
-			return indicator.TOISYNv3(input, wAESensitivity, showLabels, useTFC, useHADots, useLRSI, useWAE, zLMACDMultiplier, showDebugInfo, longArrowColor, shortArrowColor, use5Min, use15Min, use30Min, use1Hour, use4Hour, use1Day);
+			return indicator.TOISYNv3(input, wAESensitivity, showLabels, useTFC, useHADots, useLRSI, useWAE, useZLMACDFilter, zLMACDMultiplier, showDebugInfo, longArrowColor, shortArrowColor, use5Min, use15Min, use30Min, use1Hour, use4Hour, use1Day);
 		}
 	}
 }
