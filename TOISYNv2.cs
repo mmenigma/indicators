@@ -54,6 +54,11 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
         private Series<double> haDotsDebug;
         private Series<double> lrsiDebug;
         private Series<double> waeDebug;
+		
+		// Add these class variables at the top of your indicator class
+private int lastLongSignalBar = -9999;
+private int lastShortSignalBar = -9999;
+private int signalLockoutPeriod = 10; // Minimum bars between signals of same type
         
         protected override void OnStateChange()
         {
@@ -76,7 +81,7 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                 // Timeframe selection parameters
                 Use5Min = true;
                 Use15Min = true;
-                Use30Min = true;
+                Use30Min = false;
                 Use1Hour = false;
                 Use4Hour = false;
                 Use1Day = false;
@@ -88,7 +93,7 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                 UseWAE = true;
                 
                 // Add debug details
-                ShowDebugInfo = true;
+                ShowDebugInfo = false;
                 
                 // Add plots
                 AddPlot(Brushes.Transparent, "Signals");
@@ -393,115 +398,145 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                         }
                     }
                     // END DEBUG UPDATES
+
+// BEGIN SIGNAL GENERATION
                     
-                    // BEGIN SIGNAL GENERATION
-                    
-                    // Check if at least one indicator is enabled before generating signals
-                    bool anyIndicatorEnabled = UseTFC || UseHADots || UseLRSI || UseWAE;
-                    
-                    if (!anyIndicatorEnabled)
-                    {
-                        // If no indicators are enabled, don't generate any signals
-                        Values[0][0] = 0; // No signal
-                        
-                        if (ShowDebugInfo && IsFirstTickOfBar)
-                        {
-                            Print($"No signals generated at {Time[0]}: All indicators are disabled");
-                        }
-                    }
-                    else
-                    {
-                        // Normal signal generation when at least one indicator is enabled
-                        bool longSignal = tfcForLong && haDotsForLong && lrsiForLong && waeForLong;
-                        bool shortSignal = tfcForShort && haDotsForShort && lrsiForShort && waeForShort;
-                        
-                        // CRITICAL: Additional extensive debugging at signal detection point
-                        if (ShowDebugInfo && IsFirstTickOfBar)
-                        {
-                            StringBuilder sb = new StringBuilder();
-                            sb.AppendLine($"RAW SIGNAL CONDITIONS at {Time[0]}:");
-                            sb.AppendLine($"  TFC: {tfcForLong}/{tfcForShort}");
-                            sb.AppendLine($"  HADots: {haDotsForLong}/{haDotsForShort}");
-                            sb.AppendLine($"  LRSI: {lrsiForLong}/{lrsiForShort}");
-                            sb.AppendLine($"  WAE: {waeForLong}/{waeForShort}");
-                            sb.AppendLine($"  Combined: Long={longSignal}, Short={shortSignal}");
-                            sb.AppendLine($"  Current States: inLongTrend={inLongTrend}, inShortTrend={inShortTrend}");
-                            Print(sb.ToString());
-                        }
-                        
-                        if (longSignal) 
-                        {
-                            // Create signal name that includes timestamp to ensure uniqueness
-                            string timestamp = Time[0].ToString("yyyyMMdd_HHmmss");
-                            string arrowName = "LongOn_" + timestamp + "_" + CurrentBar;
-                            
-                            // Generate long signal with Heiken Ashi values for positioning
-                            Draw.ArrowUp(this, arrowName, false, 0, haLow[0] - 5 * TickSize, LongArrowColor);
-                            
-                            if (ShowLabels)
-                            {
-                                string textName = "LongOnText_" + timestamp + "_" + CurrentBar;
-                                Draw.Text(this, textName, "LongOn", 0, haLow[0] - 10 * TickSize, LongArrowColor);
-                            }
-                            
-                            Values[0][0] = 1; // Signal up
-                            
-                            if (IsFirstTickOfBar && ShowDebugInfo)
-                            {
-                                Print($"LONG SIGNAL FORCED at {Time[0]}, Price: {Close[0]}, HA: {haClose[0]}");
-                            }
-                            
-                            // Update trend states
-                            inLongTrend = true;
-                            inShortTrend = false;
-                        }
-                        else if (shortSignal)
-                        {
-                            // Create signal name that includes timestamp to ensure uniqueness
-                            string timestamp = Time[0].ToString("yyyyMMdd_HHmmss");
-                            string arrowName = "ShortOn_" + timestamp + "_" + CurrentBar;
-                            
-                            // Generate short signal with Heiken Ashi values for positioning
-                            Draw.ArrowDown(this, arrowName, false, 0, haHigh[0] + 5 * TickSize, ShortArrowColor);
-                            
-                            if (ShowLabels)
-                            {
-                                string textName = "ShortOnText_" + timestamp + "_" + CurrentBar;
-                                Draw.Text(this, textName, "ShortOn", 0, haHigh[0] + 10 * TickSize, ShortArrowColor);
-                            }
-                            
-                            Values[0][0] = -1; // Signal down
-                            
-                            if (IsFirstTickOfBar && ShowDebugInfo)
-                            {
-                                Print($"SHORT SIGNAL FORCED at {Time[0]}, Price: {Close[0]}, HA: {haClose[0]}");
-                            }
-                            
-                            // Update trend states
-                            inShortTrend = true;
-                            inLongTrend = false;
-                        }
-                        else
-                        {
-                            Values[0][0] = 0; // No signal
-                        }
-                        
-                        // Only update trend exit conditions if state tracking is important for your strategy
-                        if (!longSignal && inLongTrend)
-                        {
-                            inLongTrend = false;
-                            if (IsFirstTickOfBar && ShowDebugInfo)
-                                Print($"Exit LONG trend at {Time[0]}, Price: {Close[0]}");
-                        }
-                        
-                        if (!shortSignal && inShortTrend)
-                        {
-                            inShortTrend = false;
-                            if (IsFirstTickOfBar && ShowDebugInfo)
-                                Print($"Exit SHORT trend at {Time[0]}, Price: {Close[0]}");
-                        }
-                    }
-                    // END SIGNAL GENERATION
+// Check if at least one indicator is enabled before generating signals
+bool anyIndicatorEnabled = UseTFC || UseHADots || UseLRSI || UseWAE;
+
+if (!anyIndicatorEnabled)
+{
+    // If no indicators are enabled, don't generate any signals
+    Values[0][0] = 0; // No signal
+    
+    if (ShowDebugInfo && IsFirstTickOfBar)
+    {
+        Print($"No signals generated at {Time[0]}: All indicators are disabled");
+    }
+}
+else
+{
+    // Normal signal generation when at least one indicator is enabled
+    bool longSignal = tfcForLong && haDotsForLong && lrsiForLong && waeForLong;
+    bool shortSignal = tfcForShort && haDotsForShort && lrsiForShort && waeForShort;
+    
+    // Apply lockout period filter
+    bool longSignalAllowed = CurrentBar - lastLongSignalBar > signalLockoutPeriod;
+    bool shortSignalAllowed = CurrentBar - lastShortSignalBar > signalLockoutPeriod;
+    
+    // CRITICAL: Additional extensive debugging at signal detection point
+    if (ShowDebugInfo && IsFirstTickOfBar)
+    {
+        StringBuilder sb = new StringBuilder();
+        sb.AppendLine($"RAW SIGNAL CONDITIONS at {Time[0]}:");
+        sb.AppendLine($"  TFC: {tfcForLong}/{tfcForShort}");
+        sb.AppendLine($"  HADots: {haDotsForLong}/{haDotsForShort}");
+        sb.AppendLine($"  LRSI: {lrsiForLong}/{lrsiForShort}");
+        sb.AppendLine($"  WAE: {waeForLong}/{waeForShort}");
+        sb.AppendLine($"  Combined: Long={longSignal}, Short={shortSignal}");
+        sb.AppendLine($"  Lockout: LongAllowed={longSignalAllowed}, ShortAllowed={shortSignalAllowed}");
+        sb.AppendLine($"  Bars since last: Long={CurrentBar-lastLongSignalBar}, Short={CurrentBar-lastShortSignalBar}");
+        Print(sb.ToString());
+    }
+    
+    // Check for trend transitions - EXIT FIRST to reset trend flags
+    if (!longSignal && inLongTrend)
+    {
+        inLongTrend = false;
+        if (IsFirstTickOfBar && ShowDebugInfo)
+            Print($"Exit LONG trend at {Time[0]}, Price: {Close[0]}");
+    }
+    
+    if (!shortSignal && inShortTrend)
+    {
+        inShortTrend = false;
+        if (IsFirstTickOfBar && ShowDebugInfo)
+            Print($"Exit SHORT trend at {Time[0]}, Price: {Close[0]}");
+    }
+    
+    // AFTER checking exits, now check for new entries
+    if (longSignal && longSignalAllowed) 
+    {
+        // Create signal name that includes timestamp to ensure uniqueness
+        string arrowName = "LongEntry" + CurrentBar;
+        
+        // Generate long signal with Heiken Ashi values for positioning
+        Draw.ArrowUp(this, arrowName, false, 0, haLow[0] - 5 * TickSize, LongArrowColor);
+        
+        if (ShowLabels)
+        {
+            string textName = "LongOnText_" + CurrentBar;
+            Draw.Text(this, textName, "LongOn", 0, haLow[0] - 10 * TickSize, LongArrowColor);
+        }
+        
+        Values[0][0] = 1; // Signal up
+        
+        // Update last signal bar
+        lastLongSignalBar = CurrentBar;
+        
+        if (IsFirstTickOfBar && ShowDebugInfo)
+        {
+            Print($"LONG SIGNAL DRAWN at {Time[0]}, Bar: {CurrentBar}, Price: {Close[0]}, HA: {haClose[0]}");
+        }
+        
+        // Update trend states
+        inLongTrend = true;
+        inShortTrend = false;
+    }
+    else if (shortSignal && shortSignalAllowed)
+    {
+        // Create signal name that includes timestamp to ensure uniqueness
+        string arrowName = "ShortEntry" + CurrentBar;
+        
+        // Generate short signal with Heiken Ashi values for positioning
+        Draw.ArrowDown(this, arrowName, false, 0, haHigh[0] + 5 * TickSize, ShortArrowColor);
+        
+        if (ShowLabels)
+        {
+            string textName = "ShortOnText_" + CurrentBar;
+            Draw.Text(this, textName, "ShortOn", 0, haHigh[0] + 10 * TickSize, ShortArrowColor);
+        }
+        
+        Values[0][0] = -1; // Signal down
+        
+        // Update last signal bar
+        lastShortSignalBar = CurrentBar;
+        
+        if (IsFirstTickOfBar && ShowDebugInfo)
+        {
+            Print($"SHORT SIGNAL DRAWN at {Time[0]}, Bar: {CurrentBar}, Price: {Close[0]}, HA: {haClose[0]}");
+        }
+        
+        // Update trend states
+        inShortTrend = true;
+        inLongTrend = false;
+    }
+    else if (longSignal && inLongTrend)
+    {
+        // We're already in a long trend, so just update the value but don't draw the signal
+        Values[0][0] = 1;
+        
+        if (IsFirstTickOfBar && ShowDebugInfo && !longSignalAllowed)
+        {
+            Print($"Long conditions met at {Time[0]}, but in lockout period - no signal drawn");
+        }
+    }
+    else if (shortSignal && inShortTrend)
+    {
+        // We're already in a short trend, so just update the value but don't draw the signal
+        Values[0][0] = -1;
+        
+        if (IsFirstTickOfBar && ShowDebugInfo && !shortSignalAllowed)
+        {
+            Print($"Short conditions met at {Time[0]}, but in lockout period - no signal drawn");
+        }
+    }
+    else
+    {
+        Values[0][0] = 0; // No signal
+    }
+}
+// END SIGNAL GENERATION
                 }
             }
             catch (Exception ex)
