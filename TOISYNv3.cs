@@ -68,130 +68,134 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
 		private int signalLockoutPeriod = 10; // Adjust based on testing
         
         protected override void OnStateChange()
-        {
-            if (State == State.SetDefaults)
-            {
-                Description = @"TOISYNv3 - Predator Signals";
-                Name = "TOISYNv3";
-                Calculate = Calculate.OnBarClose;
-                IsOverlay = true;
-                DisplayInDataBox = true;
-                DrawOnPricePanel = true;
-                IsAutoScale = false;
-                
-                // Set default values for parameters
-                WAESensitivity = 150;
-                LongArrowColor = Brushes.DarkTurquoise;
-                ShortArrowColor = Brushes.Maroon;
-                ShowLabels = false;
-                
-                // Timeframe selection parameters
-                Use5Min = true;
-                Use15Min = true;
-                Use30Min = false;
-                Use1Hour = false;
-                Use4Hour = false;
-                Use1Day = false;
-                
-                // Enable/disable individual indicators
-                UseTFC = true;
-                UseHADots = true;
-                UseLRSI = true;
-                UseWAE = true;
-				
-				// Initialize ZLMACD components
-				zlMacd = ZLMAcd(12, 26, 9, 0.7); // Your settings from the screenshot
-				zlMacdValue = new Series<double>(this);
-				zlMacdAvg = new Series<double>(this);
-                ZLMACDMultiplier = 0.5;
-                zlMacdMultiplier = ZLMACDMultiplier;
-				
-                // Add debug details
-                ShowDebugInfo = false;
-                
-                // Add plots
-                AddPlot(Brushes.Transparent, "Signals");
-                
-                // Debug plots
-                AddPlot(Brushes.White, "TFC");
-                AddPlot(Brushes.Yellow, "HADots");
-                AddPlot(Brushes.Cyan, "LRSI");
-                AddPlot(Brushes.Magenta, "WAE");
-            }
-            else if (State == State.Configure)
-            {
-                // Initialize Heiken Ashi series
-                haOpen = new Series<double>(this);
-                haClose = new Series<double>(this);
-                haHigh = new Series<double>(this);
-                haLow = new Series<double>(this);
-                haDotsState = new Series<double>(this);
-                
-                // Initialize LaguerreRSI series
-                _l0Series = new Series<double>(this);
-                _l1Series = new Series<double>(this);
-                _l2Series = new Series<double>(this);
-                _l3Series = new Series<double>(this);
-                lrsiValue = new Series<double>(this);
-                
-                // Initialize WAE series
-                waeTrendUp = new Series<double>(this);
-                waeTrendDown = new Series<double>(this);
-                waeExplosionLine = new Series<double>(this);
-                
-                // Initialize debug series
-                tfcDebug = new Series<double>(this);
-                haDotsDebug = new Series<double>(this);
-                lrsiDebug = new Series<double>(this);
-                waeDebug = new Series<double>(this);
-                
-                // Set initial zero values
-                for (int i = 1; i < 5; i++)
-                {
-                    Values[i].Reset();
-                }
-                
-                // Add additional timeframe data if needed
-                if (Use5Min && (BarsPeriod.BarsPeriodType != BarsPeriodType.Minute || BarsPeriod.Value != 5))
-                    AddDataSeries(BarsPeriodType.Minute, 5);
-                
-                if (Use15Min && (BarsPeriod.BarsPeriodType != BarsPeriodType.Minute || BarsPeriod.Value != 15))
-                    AddDataSeries(BarsPeriodType.Minute, 15);
-                
-                if (Use30Min && (BarsPeriod.BarsPeriodType != BarsPeriodType.Minute || BarsPeriod.Value != 30))
-                    AddDataSeries(BarsPeriodType.Minute, 30);
-                
-                if (Use1Hour && (BarsPeriod.BarsPeriodType != BarsPeriodType.Minute || BarsPeriod.Value != 60))
-                    AddDataSeries(BarsPeriodType.Minute, 60);
-                
-                if (Use4Hour && (BarsPeriod.BarsPeriodType != BarsPeriodType.Minute || BarsPeriod.Value != 240))
-                    AddDataSeries(BarsPeriodType.Minute, 240);
-                
-                if (Use1Day && (BarsPeriod.BarsPeriodType != BarsPeriodType.Day || BarsPeriod.Value != 1))
-                    AddDataSeries(BarsPeriodType.Day, 1);
-            }
-            else if (State == State.Historical)
-            {
-                // Initialize debug plot values to avoid nulls
-                if (ShowDebugInfo && CurrentBar == 0)
-                {
-                    tfcDebug[0] = 0;
-                    haDotsDebug[0] = 0;
-                    lrsiDebug[0] = 0;
-                    waeDebug[0] = 0;
-                    
-                    // Also initialize plot values
-                    if (Values != null && Values.Length >= 5)
-                    {
-                        for (int i = 1; i < 5; i++)
-                        {
-                            if (Values[i] != null)
-                                Values[i][0] = 0;
-                        }
-                    }
-                }
-            }
-        }
+{
+	    if (State == State.SetDefaults)
+	    {
+	        Description = @"TOISYNv3 - Predator Signals";
+	        Name = "TOISYNv3";
+	        Calculate = Calculate.OnBarClose;
+	        IsOverlay = true;
+	        DisplayInDataBox = true;
+	        DrawOnPricePanel = true;
+	        IsAutoScale = false;
+	        
+	        // Set default values for parameters
+	        WAESensitivity = 150;
+	        LongArrowColor = Brushes.DarkTurquoise;
+	        ShortArrowColor = Brushes.Maroon;
+	        ShowLabels = false;
+	        
+	        // Timeframe selection parameters
+	        Use5Min = true;
+	        Use15Min = true;
+	        Use30Min = false;
+	        Use1Hour = false;
+	        Use4Hour = false;
+	        Use1Day = false;
+	        
+	        // Enable/disable individual indicators
+	        UseTFC = true;
+	        UseHADots = true;
+	        UseLRSI = true;
+	        UseWAE = true;
+	        
+	        // Set ZLMACD default value
+	        ZLMACDMultiplier = 0.5;
+	        
+	        // Add debug details
+	        ShowDebugInfo = false;
+	        
+	        // Add plots
+	        AddPlot(Brushes.Transparent, "Signals");
+	        
+	        // Debug plots
+	        AddPlot(Brushes.White, "TFC");
+	        AddPlot(Brushes.Yellow, "HADots");
+	        AddPlot(Brushes.Cyan, "LRSI");
+	        AddPlot(Brushes.Magenta, "WAE");
+	    }
+	    else if (State == State.Configure)
+	    {
+	        // Initialize Heiken Ashi series
+	        haOpen = new Series<double>(this);
+	        haClose = new Series<double>(this);
+	        haHigh = new Series<double>(this);
+	        haLow = new Series<double>(this);
+	        haDotsState = new Series<double>(this);
+	        
+	        // Initialize LaguerreRSI series
+	        _l0Series = new Series<double>(this);
+	        _l1Series = new Series<double>(this);
+	        _l2Series = new Series<double>(this);
+	        _l3Series = new Series<double>(this);
+	        lrsiValue = new Series<double>(this);
+	        
+	        // Initialize WAE series
+	        waeTrendUp = new Series<double>(this);
+	        waeTrendDown = new Series<double>(this);
+	        waeExplosionLine = new Series<double>(this);
+	        
+	        // Initialize ZLMACD components - moved here from SetDefaults
+	        zlMacd = ZLMAcd(12, 26, 9, 0.7); // Your settings from the screenshot
+	        zlMacdValue = new Series<double>(this);
+	        zlMacdAvg = new Series<double>(this);
+	        
+	        // Connect parameter to variable
+	        zlMacdMultiplier = ZLMACDMultiplier;
+	        
+	        // Initialize debug series
+	        tfcDebug = new Series<double>(this);
+	        haDotsDebug = new Series<double>(this);
+	        lrsiDebug = new Series<double>(this);
+	        waeDebug = new Series<double>(this);
+	        
+	        // Set initial zero values
+	        for (int i = 1; i < 5; i++)
+	        {
+	            Values[i].Reset();
+	        }
+	        
+	        // Add additional timeframe data if needed
+	        if (Use5Min && (BarsPeriod.BarsPeriodType != BarsPeriodType.Minute || BarsPeriod.Value != 5))
+	            AddDataSeries(BarsPeriodType.Minute, 5);
+	        
+	        if (Use15Min && (BarsPeriod.BarsPeriodType != BarsPeriodType.Minute || BarsPeriod.Value != 15))
+	            AddDataSeries(BarsPeriodType.Minute, 15);
+	        
+	        if (Use30Min && (BarsPeriod.BarsPeriodType != BarsPeriodType.Minute || BarsPeriod.Value != 30))
+	            AddDataSeries(BarsPeriodType.Minute, 30);
+	        
+	        if (Use1Hour && (BarsPeriod.BarsPeriodType != BarsPeriodType.Minute || BarsPeriod.Value != 60))
+	            AddDataSeries(BarsPeriodType.Minute, 60);
+	        
+	        if (Use4Hour && (BarsPeriod.BarsPeriodType != BarsPeriodType.Minute || BarsPeriod.Value != 240))
+	            AddDataSeries(BarsPeriodType.Minute, 240);
+	        
+	        if (Use1Day && (BarsPeriod.BarsPeriodType != BarsPeriodType.Day || BarsPeriod.Value != 1))
+	            AddDataSeries(BarsPeriodType.Day, 1);
+	    }
+	    else if (State == State.Historical)
+	    {
+	        // Initialize debug plot values to avoid nulls
+	        if (ShowDebugInfo && CurrentBar == 0)
+	        {
+	            tfcDebug[0] = 0;
+	            haDotsDebug[0] = 0;
+	            lrsiDebug[0] = 0;
+	            waeDebug[0] = 0;
+	            
+	            // Also initialize plot values
+	            if (Values != null && Values.Length >= 5)
+	            {
+	                for (int i = 1; i < 5; i++)
+	                {
+	                    if (Values[i] != null)
+	                        Values[i][0] = 0;
+	                }
+	            }
+	        }
+	    }
+	}
         
         protected override void OnBarUpdate()
         {
