@@ -1,0 +1,11 @@
+ // Signal Settings
+  ShowEntrySignal = false;
+  LongOn = "LongEntry";
+  ShortOn = "ShortEntry";
+	
+  ShowExitSignal = false;
+  LongOff = "LongEntry";
+  ShortOff = "ShortEntry";
+	ExitXColor = Brushes.White;      
+
+  Signal_Offset = 5;
