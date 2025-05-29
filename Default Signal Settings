@@ -1,20 +1,17 @@
 // Signal Settings
 ShowEntrySignals = false;
 LongOn = "LongEntry";
+LongEntryColor = Brushes.Lime;
 ShortOn = "ShortEntry";
+ShortEntryColor = Brushes.Red;
 
 ShowExitSignals = false;
 LongOff = "LongExit";
 ShortOff = "ShortExit";
+ExitColor = Brushes.DimGray;
 				
 Signal_Offset = 5;
 				
-// Signal Colors
-LongEntryColor = Brushes.Lime;
-ShortEntryColor = Brushes.Red;
-ExitColor = Brushes.DimGray;
-
-
 // Properties
 // Signal settings
 [NinjaScriptProperty]
