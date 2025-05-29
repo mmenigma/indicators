@@ -1,4 +1,4 @@
- // Signal Settings
+// Signal Settings
 ShowEntrySignals = false;
 LongOn = "LongEntry";
 ShortOn = "ShortEntry";
