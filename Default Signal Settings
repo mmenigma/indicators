@@ -1,11 +1,109 @@
  // Signal Settings
-  ShowEntrySignal = false;
-  LongOn = "LongEntry";
-  ShortOn = "ShortEntry";
-	
-  ShowExitSignal = false;
-  LongOff = "LongEntry";
-  ShortOff = "ShortEntry";
-	ExitXColor = Brushes.White;      
+ShowEntrySignals = false;
+LongOn = "LongEntry";
+ShortOn = "ShortEntry";
 
-  Signal_Offset = 5;
+ShowExitSignals = false;
+LongOff = "LongExit";
+ShortOff = "ShortExit";
+				
+Signal_Offset = 5;
+				
+// Signal Colors
+LongEntryColor = Brushes.Lime;
+ShortEntryColor = Brushes.Red;
+ExitColor = Brushes.DimGray;
+
+
+// Properties
+// Signal settings
+[NinjaScriptProperty]
+[Display(Name = "Show Entry Signals", Order = 1, GroupName = "Entry Signal Settings")]
+public bool ShowEntrySignal { get; set; }
+
+[NinjaScriptProperty]
+[Display(Name = "Long On", GroupName = "Entry Signal Settings", Order = 2)]
+public string LongOn { get; set; }
+
+[NinjaScriptProperty]
+[Display(Name = "Long Entry Mark", GroupName = "Entry Signal Settings", Order = 3)]
+ public double LongEntryMark { get; set; }
+        
+[NinjaScriptProperty]
+[XmlIgnore]
+[Display(Name = "Long Arrow Color", Description = "Color for the long entry arrow", Order = 4, GroupName = "Entry Signal Settings")]
+ public Brush EntryArrowColor { get; set; }
+        
+[Browsable(false)]
+        public string EntryArrowColorSerializable
+        {
+        get { return Serialize.BrushToString(EntryArrowColor); }
+        set { EntryArrowColor = Serialize.StringToBrush(value); }
+        }
+		
+[NinjaScriptProperty]
+[Display(Name = "Short On", GroupName = "Entry Signal Settings", Order = 5)]
+public string ShortOn { get; set; }
+		
+[NinjaScriptProperty]
+[Display(Name = "Short Entry Mark", GroupName = "Entry Signal Settings", Order = 6)]
+public double ShortEntryMark { get; set; }
+		
+[NinjaScriptProperty]
+[XmlIgnore]
+[Display(Name = "Short Arrow Color", Description = "Color for the short entry arrow", Order = 7, GroupName = "Entry Signal Settings")]
+	public Brush ShortArrowColor { get; set; }
+		
+	[Browsable(false)]
+	public string ShortArrowColorSerializable
+		{
+		 get { return Serialize.BrushToString(ShortArrowColor); }
+		 set { ShortArrowColor = Serialize.StringToBrush(value); }
+		}
+        
+[NinjaScriptProperty]
+[Display(Name = "Confirmation Bars", GroupName = "Entry Signal Settings", Order = 7)]
+public int ConfirmationBars { get; set; }
+		
+[NinjaScriptProperty]
+[Range(0, double.MaxValue)]
+[Display(Name = "Signals Offset", GroupName = "Entry Signal Settings", Order = 8)]
+        public double Signal_Offset { get; set; }
+
+[NinjaScriptProperty]
+[Display(Name = "Use Exit Signals", GroupName = "Exit Signal Settings", Order = 9,
+ Description = "When enabled, shows Exit Mark set by user")]
+public bool ShowExitSignal { get; set; }
+
+[NinjaScriptProperty]
+[Display(Name = "Long Off", GroupName = "Exit Signal Settings", Order = 10)]
+public string LongOff { get; set; }
+        
+[NinjaScriptProperty]
+[Display(Name = "Long Exit Mark", GroupName = "Exit Signal Settings", Order = 11,
+Description = "WVF value that triggers exit signals")]
+public double LongExitMark { get; set; }
+		
+[NinjaScriptProperty]
+[Display(Name = "Short Off", GroupName = "Exit Signal Settings", Order = 12)]
+public string ShortOff { get; set; }
+		
+[NinjaScriptProperty]
+		[Display(Name = "Short Exit Mark", GroupName = "Exit Signal Settings", Order = 13,
+		Description = "WVF value that triggers short exit signals")]
+		public double ShortExitMark { get; set; }
+        
+[Browsable(false)]
+   public string ExitOColorSerializable
+        {
+        get { return Serialize.BrushToString(ExitOColor); }
+        set { ExitOColor = Serialize.StringToBrush(value); }
+        }
+		    
+[NinjaScriptProperty]
+[XmlIgnore]
+[Display(Name = "Exit 'o' Color", Description = "Color for the exit o", Order = 15, GroupName = "Exit Signal Settings")]
+public Brush ExitColor { get; set; }
+
+// Example of string for the draw signal
+Draw.ArrowUp(this, LongOn + CurrentBar.ToString(), true, 0, Low[0] - Signal_Offset * TickSize, LongEntryColor);
