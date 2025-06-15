@@ -74,7 +74,7 @@ public string LongOff { get; set; }
         
 [NinjaScriptProperty]
 [Display(Name = "Long Exit Mark", GroupName = "Exit Signal Settings", Order = 11,
-Description = "WVF value that triggers exit signals")]
+Description = "value that triggers exit signals")]
 public double LongExitMark { get; set; }
 		
 [NinjaScriptProperty]
@@ -82,9 +82,9 @@ public double LongExitMark { get; set; }
 public string ShortOff { get; set; }
 		
 [NinjaScriptProperty]
-		[Display(Name = "Short Exit Mark", GroupName = "Exit Signal Settings", Order = 13,
-		Description = "WVF value that triggers short exit signals")]
-		public double ShortExitMark { get; set; }
+[Display(Name = "Short Exit Mark", GroupName = "Exit Signal Settings", Order = 13,
+Description = "value that triggers short exit signals")]
+public double ShortExitMark { get; set; }
         
 [Browsable(false)]
    public string ExitOColorSerializable
