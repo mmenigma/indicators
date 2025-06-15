@@ -57,10 +57,6 @@ public double ShortEntryMark { get; set; }
 		 get { return Serialize.BrushToString(ShortArrowColor); }
 		 set { ShortArrowColor = Serialize.StringToBrush(value); }
 		}
-        
-[NinjaScriptProperty]
-[Display(Name = "Confirmation Bars", GroupName = "Entry Signal Settings", Order = 7)]
-public int ConfirmationBars { get; set; }
 		
 [NinjaScriptProperty]
 [Range(0, double.MaxValue)]
