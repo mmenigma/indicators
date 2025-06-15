@@ -29,7 +29,7 @@ public string LongOn { get; set; }
 [NinjaScriptProperty]
 [XmlIgnore]
 [Display(Name = "Long Arrow Color", Description = "Color for the long entry arrow", Order = 4, GroupName = "Entry Signal Settings")]
- public Brush EntryArrowColor { get; set; }
+public Brush EntryArrowColor { get; set; }
         
 [Browsable(false)]
         public string EntryArrowColorSerializable
@@ -65,7 +65,7 @@ public double ShortEntryMark { get; set; }
 
 [NinjaScriptProperty]
 [Display(Name = "Use Exit Signals", GroupName = "Exit Signal Settings", Order = 9,
- Description = "When enabled, shows Exit Mark set by user")]
+Description = "When enabled, shows Exit Mark set by user")]
 public bool ShowExitSignal { get; set; }
 
 [NinjaScriptProperty]
