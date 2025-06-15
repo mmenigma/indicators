@@ -1,5 +1,5 @@
 // this file is a guide for how the signal settings can be implemented.  
-// It may not be a complete list of what's need for this project or may have additional unnecessary code.
+// It may not be a complete list of what's needed for this project or may have additional unnecessary code.
 
 // Signal Settings
 ShowEntrySignals = false;
