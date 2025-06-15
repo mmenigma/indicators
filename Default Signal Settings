@@ -71,11 +71,6 @@ public bool ShowExitSignal { get; set; }
 [NinjaScriptProperty]
 [Display(Name = "Long Off", GroupName = "Exit Signal Settings", Order = 10)]
 public string LongOff { get; set; }
-        
-[NinjaScriptProperty]
-[Display(Name = "Long Exit Mark", GroupName = "Exit Signal Settings", Order = 11,
-Description = "value that triggers exit signals")]
-public double LongExitMark { get; set; }
 		
 [NinjaScriptProperty]
 [Display(Name = "Short Off", GroupName = "Exit Signal Settings", Order = 12)]
