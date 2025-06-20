@@ -34,18 +34,24 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
         private Series<double> macdLine;
         private Series<double> signalLine;
         
-        private bool longCondition1, longCondition2, longCondition3, longCondition4, longCondition5;
-        private bool shortCondition1, shortCondition2, shortCondition3, shortCondition4, shortCondition5;
+        private bool longCondition1, longCondition2, longCondition3, longCondition4, longCondition5, longCondition6;
+        private bool shortCondition1, shortCondition2, shortCondition3, shortCondition4, shortCondition5, shortCondition6;
         private bool wasLongSignal, wasShortSignal;
         private bool inLongTrend, inShortTrend;
         private int longConditionCount, shortConditionCount;
+        
+        // Option 2 Exit Strategy variables
+        private bool macdMomentumLoss;
+        private bool adxWeakening;
+        private bool diWeakening;
+        private double previousDISpread, currentDISpread;
         #endregion
 
         protected override void OnStateChange()
         {
             if (State == State.SetDefaults)
             {
-                Description = @"TrendSpotter Trading Signal Indicator";
+                Description = @"TrendSpotter Trading Signal Indicator - Option 2 Exit Strategy";
                 Name = "TrendSpotter";
                 Calculate = Calculate.OnBarClose;
                 IsOverlay = true;
@@ -87,9 +93,6 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
 
                 // Exit Signal Color
                 ExitColor = Brushes.DimGray;
-            }
-            else if (State == State.SetDefaults)
-            {
             }
             else if (State == State.DataLoaded)
             {
@@ -153,6 +156,11 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
             double diMinus = dm.DiMinus[0];
             double emaValue = ema20[0];
 
+            // Calculate DI Spread for exit conditions
+            currentDISpread = Math.Abs(diPlus - diMinus);
+            if (CurrentBar > 0)
+                previousDISpread = Math.Abs(dm.DiPlus[1] - dm.DiMinus[1]);
+
             // Check if ADX is rising over specified bars
             bool adxRising = true;
             if (CurrentBar >= AdxRisingBars)
@@ -167,34 +175,38 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                 }
             }
 
-            // Long Conditions
-            longCondition1 = macdValue > 0 && macdValue > macdAvg;  // MACD above 0 and above Avg
-            longCondition2 = adxRising;                             // ADX Rising
-            longCondition3 = diPlus > diMinus;                      // DI is bullish (+DI > -DI)
-            longCondition4 = Close[0] > emaValue;                   // Bar closes above 20EMA
-            longCondition5 = CurrentBar > 0 ? macdValue > (MacdMAType == CustomEnumNamespace.UniversalMovingAverage.EMA ? macd.Default[1] : macdLine[1]) : true; // MACD rising
+            // 6-Condition Entry System (keeping the working system)
+            longCondition1 = macdValue > 0;                             // MACD above zero
+            longCondition2 = macdValue > macdAvg;                       // MACD above signal
+            longCondition3 = CurrentBar > 0 ? macdValue > (MacdMAType == CustomEnumNamespace.UniversalMovingAverage.EMA ? macd.Default[1] : macdLine[1]) : true; // MACD rising
+            longCondition4 = adxRising;                                 // ADX Rising
+            longCondition5 = diPlus > diMinus;                          // DI is bullish (+DI > -DI)
+            longCondition6 = Close[0] > emaValue;                       // Bar closes above 20EMA
 
-            // Short Conditions  
-            shortCondition1 = macdValue < 0 && macdValue < macdAvg; // MACD below 0 and below Avg
-            shortCondition2 = adxRising;                            // ADX Rising
-            shortCondition3 = diMinus > diPlus;                     // DI is bearish (-DI > +DI)
-            shortCondition4 = Close[0] < emaValue;                  // Bar closes below 20EMA
-            shortCondition5 = CurrentBar > 0 ? macdValue < (MacdMAType == CustomEnumNamespace.UniversalMovingAverage.EMA ? macd.Default[1] : macdLine[1]) : true; // MACD falling
+            shortCondition1 = macdValue < 0;                            // MACD below zero
+            shortCondition2 = macdValue < macdAvg;                      // MACD below signal
+            shortCondition3 = CurrentBar > 0 ? macdValue < (MacdMAType == CustomEnumNamespace.UniversalMovingAverage.EMA ? macd.Default[1] : macdLine[1]) : true; // MACD falling
+            shortCondition4 = adxRising;                                // ADX Rising
+            shortCondition5 = diMinus > diPlus;                         // DI is bearish (-DI > +DI)
+            shortCondition6 = Close[0] < emaValue;                      // Bar closes below 20EMA
 
             // Count conditions
-            longConditionCount = (longCondition1 ? 1 : 0) + (longCondition2 ? 1 : 0) + 
-                               (longCondition3 ? 1 : 0) + (longCondition4 ? 1 : 0) + (longCondition5 ? 1 : 0);
+            longConditionCount = (longCondition1 ? 1 : 0) + (longCondition2 ? 1 : 0) + (longCondition3 ? 1 : 0) + 
+                               (longCondition4 ? 1 : 0) + (longCondition5 ? 1 : 0) + (longCondition6 ? 1 : 0);
             
-            shortConditionCount = (shortCondition1 ? 1 : 0) + (shortCondition2 ? 1 : 0) + 
-                                (shortCondition3 ? 1 : 0) + (shortCondition4 ? 1 : 0) + (shortCondition5 ? 1 : 0);
+            shortConditionCount = (shortCondition1 ? 1 : 0) + (shortCondition2 ? 1 : 0) + (shortCondition3 ? 1 : 0) + 
+                                (shortCondition4 ? 1 : 0) + (shortCondition5 ? 1 : 0) + (shortCondition6 ? 1 : 0);
 
             // Current signal status
-            bool currentLongSignal = longConditionCount == 5;
-            bool currentShortSignal = shortConditionCount == 5;
+            bool currentLongSignal = longConditionCount == 6;
+            bool currentShortSignal = shortConditionCount == 6;
 
-            // Check for exit conditions
-            bool longExit = inLongTrend && macdValue < macdAvg;
-            bool shortExit = inShortTrend && macdValue > macdAvg;
+            // Option 2 Exit Strategy: Multi-Condition Exit Logic
+            CalculateExitConditions(macdValue);
+
+            // Check for exit conditions using Option 2 strategy
+            bool longExit = inLongTrend && (macdMomentumLoss && (adxWeakening || diWeakening));
+            bool shortExit = inShortTrend && (macdMomentumLoss && (adxWeakening || diWeakening));
 
             // Update trend status
             if (currentLongSignal && !inLongTrend)
@@ -230,7 +242,7 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                 }
 
                 // Background logic: Yellow for partial signals, but no background once in trend
-                if (!inLongTrend && !inShortTrend && (longConditionCount == 4 || shortConditionCount == 4))
+                if (!inLongTrend && !inShortTrend && (longConditionCount == 5 || shortConditionCount == 5))
                 {
                     BackBrush = CreateBrushWithOpacity(PartialSignalColor, PartialSignalOpacity);
                 }
@@ -240,10 +252,10 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                 }
             }
 
-            // Exit Signals
-            if (ShowExitSignals && CurrentBar > 0)
+            // Exit Signals using Option 2 strategy
+            if (ShowExitSignals && CurrentBar > 1)
             {
-                // Long Exit: was in long trend, MACD crosses below avg
+                // Long Exit: Option 2 conditions met
                 if (longExit)
                 {
                     Draw.Text(this, LongOff + CurrentBar, true, "o", 0, 
@@ -252,7 +264,7 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                              Brushes.Transparent, Brushes.Transparent, 0);
                 }
 
-                // Short Exit: was in short trend, MACD crosses above avg  
+                // Short Exit: Option 2 conditions met
                 if (shortExit)
                 {
                     Draw.Text(this, ShortOff + CurrentBar, true, "o", 0,
@@ -262,25 +274,63 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                 }
             }
 
-				// Update previous signal status - maintain during trends, reset only on exits
-				if (longExit || shortExit) 
-				{
-				    wasLongSignal = false;
-				    wasShortSignal = false;
-				}
-				else if (inLongTrend || inShortTrend)
-				{
-				    // Maintain signal state during active trends
-				    wasLongSignal = inLongTrend ? true : wasLongSignal;
-				    wasShortSignal = inShortTrend ? true : wasShortSignal;
-				}
-				else
-				{
-				    // Normal tracking when not in trend
-				    wasLongSignal = currentLongSignal;
-				    wasShortSignal = currentShortSignal;
-				}
-		}
+            // Update previous signal status - maintain during trends, reset only on exits
+            if (longExit || shortExit) 
+            {
+                wasLongSignal = false;
+                wasShortSignal = false;
+            }
+            else if (inLongTrend || inShortTrend)
+            {
+                // Maintain signal state during active trends
+                wasLongSignal = inLongTrend ? true : wasLongSignal;
+                wasShortSignal = inShortTrend ? true : wasShortSignal;
+            }
+            else
+            {
+                // Normal tracking when not in trend
+                wasLongSignal = currentLongSignal;
+                wasShortSignal = currentShortSignal;
+            }
+        }
+
+        private void CalculateExitConditions(double macdValue)
+        {
+            // MACD Momentum Check: Current MACD ≤ Previous MACD for 2 consecutive bars
+            macdMomentumLoss = false;
+            if (CurrentBar >= 2)
+            {
+                double previousMacd1, previousMacd2;
+                
+                if (MacdMAType == CustomEnumNamespace.UniversalMovingAverage.EMA)
+                {
+                    previousMacd1 = macd.Default[1];
+                    previousMacd2 = macd.Default[2];
+                }
+                else
+                {
+                    previousMacd1 = macdLine[1];
+                    previousMacd2 = macdLine[2];
+                }
+                
+                // Check if MACD has stopped rising for 2 consecutive bars
+                macdMomentumLoss = (macdValue <= previousMacd1) && (previousMacd1 <= previousMacd2);
+            }
+
+            // ADX Weakening: ADX[0] < ADX[1] (trend strength weakening)
+            adxWeakening = false;
+            if (CurrentBar >= 1)
+            {
+                adxWeakening = dm.ADXPlot[0] < dm.ADXPlot[1];
+            }
+
+            // DI Weakening: DI_Spread decreasing (directional bias weakening)
+            diWeakening = false;
+            if (CurrentBar >= 1)
+            {
+                diWeakening = currentDISpread < previousDISpread;
+            }
+        }
 
         private Brush CreateBrushWithOpacity(Brush baseBrush, int opacity)
         {
