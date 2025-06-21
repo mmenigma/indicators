@@ -10,6 +10,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Xml.Serialization;
+using System.IO;
 using NinjaTrader.Cbi;
 using NinjaTrader.Gui;
 using NinjaTrader.Gui.Chart;
@@ -29,6 +30,7 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
         private MACD macd;
         private DM dm;
         private EMA ema20;
+        private ATR atr;
         private Series<double> fastMA;
         private Series<double> slowMA;
         private Series<double> macdLine;
@@ -45,13 +47,24 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
         private bool adxWeakening;
         private bool diWeakening;
         private double previousDISpread, currentDISpread;
+        private bool useOption3ForTimeframe;
+        
+        // Data logging variables
+        private string currentLogFile;
+        private bool headerWritten;
+        
+        // Tracking variables for analysis
+        private double entryPrice;
+        private double maxFavorableMove;
+        private double maxAdverseMove;
+        private int barsInTrend;
         #endregion
 
         protected override void OnStateChange()
         {
             if (State == State.SetDefaults)
             {
-                Description = @"TrendSpotter Trading Signal Indicator - Option 2 Exit Strategy";
+                Description = @"TrendSpotter Trading Signal Indicator - Option 2 Exit Strategy with Full Tracking";
                 Name = "TrendSpotter";
                 Calculate = Calculate.OnBarClose;
                 IsOverlay = true;
@@ -93,12 +106,16 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
 
                 // Exit Signal Color
                 ExitColor = Brushes.DimGray;
+                
+                // Data Tracking
+                EnableDataTracking = true;
             }
             else if (State == State.DataLoaded)
             {
                 // Initialize indicators and series
                 dm = DM(DmPeriod);
                 ema20 = EMA(EmaPeriod);
+                atr = ATR(14);
                 
                 if (MacdMAType == CustomEnumNamespace.UniversalMovingAverage.EMA)
                 {
@@ -113,6 +130,15 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                     macdLine = new Series<double>(this);
                     signalLine = new Series<double>(this);
                 }
+                
+                // Initialize tracking variables
+                currentLogFile = "";
+                headerWritten = false;
+                entryPrice = 0;
+                maxFavorableMove = 0;
+                maxAdverseMove = 0;
+                barsInTrend = 0;
+                useOption3ForTimeframe = BarsPeriod.Value >= 5; // Use Option 3 for 5+ minute timeframes
             }
         }
 
@@ -174,6 +200,17 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                     }
                 }
             }
+            
+            // Check consecutive rising ADX bars
+            int consecutiveRisingBars = 0;
+            for (int i = 1; i <= 5 && CurrentBar >= i; i++)
+            {
+                if (dm.ADXPlot[i-1] > dm.ADXPlot[i])
+                    consecutiveRisingBars++;
+                else
+                    break;
+            }
+            bool adxRisingConsecutive = consecutiveRisingBars >= AdxRisingBars;
 
             // 6-Condition Entry System (keeping the working system)
             longCondition1 = macdValue > 0;                             // MACD above zero
@@ -201,31 +238,79 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
             bool currentLongSignal = longConditionCount == 6;
             bool currentShortSignal = shortConditionCount == 6;
 
-            // Option 2 Exit Strategy: Multi-Condition Exit Logic
-            CalculateExitConditions(macdValue);
+            // Dynamic Exit Strategy based on timeframe
+            bool longExit, shortExit;
 
-            // Check for exit conditions using Option 2 strategy
-            bool longExit = inLongTrend && (macdMomentumLoss && (adxWeakening || diWeakening));
-            bool shortExit = inShortTrend && (macdMomentumLoss && (adxWeakening || diWeakening));
+            if (useOption3ForTimeframe)
+            {
+                // Option 3: Exit when any of the 6 conditions becomes false (5+ minute timeframes)
+                bool anyConditionFalse = !longCondition1 || !longCondition2 || !longCondition3 || 
+                                        !longCondition4 || !longCondition5 || !longCondition6;
+                bool anyShortConditionFalse = !shortCondition1 || !shortCondition2 || !shortCondition3 || 
+                                             !shortCondition4 || !shortCondition5 || !shortCondition6;
+                
+                longExit = inLongTrend && anyConditionFalse;
+                shortExit = inShortTrend && anyShortConditionFalse;
+            }
+            else
+            {
+                // Option 2: Multi-Condition Exit Logic (1-minute and shorter timeframes)
+                CalculateExitConditions(macdValue);
+                longExit = inLongTrend && (macdMomentumLoss && (adxWeakening || diWeakening));
+                shortExit = inShortTrend && (macdMomentumLoss && (adxWeakening || diWeakening));
+            }
+
+            // Track performance during trends
+            if (inLongTrend || inShortTrend)
+            {
+                barsInTrend++;
+                
+                if (inLongTrend)
+                {
+                    double currentMove = Close[0] - entryPrice;
+                    if (currentMove > maxFavorableMove)
+                        maxFavorableMove = currentMove;
+                    if (currentMove < maxAdverseMove)
+                        maxAdverseMove = currentMove;
+                }
+                else if (inShortTrend)
+                {
+                    double currentMove = entryPrice - Close[0];
+                    if (currentMove > maxFavorableMove)
+                        maxFavorableMove = currentMove;
+                    if (currentMove < maxAdverseMove)
+                        maxAdverseMove = currentMove;
+                }
+            }
 
             // Update trend status
             if (currentLongSignal && !inLongTrend)
             {
                 inLongTrend = true;
                 inShortTrend = false;
+                entryPrice = Close[0];
+                maxFavorableMove = 0;
+                maxAdverseMove = 0;
+                barsInTrend = 1;
             }
             else if (currentShortSignal && !inShortTrend)
             {
                 inShortTrend = true;
                 inLongTrend = false;
+                entryPrice = Close[0];
+                maxFavorableMove = 0;
+                maxAdverseMove = 0;
+                barsInTrend = 1;
             }
             else if (longExit)
             {
                 inLongTrend = false;
+                barsInTrend = 0;
             }
             else if (shortExit)
             {
                 inShortTrend = false;
+                barsInTrend = 0;
             }
 
             // Draw background colors and entry signals
@@ -252,10 +337,10 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                 }
             }
 
-            // Exit Signals using Option 2 strategy
+            // Exit Signals using dynamic strategy
             if (ShowExitSignals && CurrentBar > 1)
             {
-                // Long Exit: Option 2 conditions met
+                // Long Exit
                 if (longExit)
                 {
                     Draw.Text(this, LongOff + CurrentBar, true, "o", 0, 
@@ -264,7 +349,7 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                              Brushes.Transparent, Brushes.Transparent, 0);
                 }
 
-                // Short Exit: Option 2 conditions met
+                // Short Exit
                 if (shortExit)
                 {
                     Draw.Text(this, ShortOff + CurrentBar, true, "o", 0,
@@ -272,6 +357,14 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                              new SimpleFont("Arial", 12), TextAlignment.Center,
                              Brushes.Transparent, Brushes.Transparent, 0);
                 }
+            }
+
+            // Data logging for analysis with Option 2/3 exit tracking
+            if (EnableDataTracking)
+            {
+                LogDataForAnalysis(macdValue, macdAvg, adx, diPlus, diMinus, emaValue, 
+                                 adxRising, adxRisingConsecutive, consecutiveRisingBars,
+                                 currentLongSignal, currentShortSignal, longExit, shortExit);
             }
 
             // Update previous signal status - maintain during trends, reset only on exits
@@ -329,6 +422,127 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
             if (CurrentBar >= 1)
             {
                 diWeakening = currentDISpread < previousDISpread;
+            }
+        }
+
+        private void LogDataForAnalysis(double macdValue, double macdAvg, double adx, double diPlus, double diMinus, 
+                                      double emaValue, bool adxRising, bool adxRisingConsecutive, int consecutiveRisingBars,
+                                      bool currentLongSignal, bool currentShortSignal, bool longExit, bool shortExit)
+        {
+            try
+            {
+                DateTime barTime = Time[0];
+                TimeSpan startTime = new TimeSpan(9, 30, 0);
+                TimeSpan endTime = new TimeSpan(16, 0, 0);
+                
+                if (barTime.TimeOfDay < startTime || barTime.TimeOfDay >= endTime)
+                    return;
+                
+                string instrumentName = Instrument.MasterInstrument.Name.Replace(" ", "_").Replace("/", "_");
+                string chartTypeFolder = DetermineChartTypeFolder();
+                string basePath = @"G:\My Drive\Trading\WIP\TrendSpotter\TSData";
+                string folderPath = Path.Combine(basePath, $"TS {instrumentName} {chartTypeFolder}");
+                
+                if (!Directory.Exists(folderPath))
+                {
+                    Directory.CreateDirectory(folderPath);
+                }
+                
+                string dateString = barTime.ToString("yyyy-MM-dd");
+                string fileName = $"TS_Analysis_{dateString}.csv";
+                string filePath = Path.Combine(folderPath, fileName);
+                
+                if (currentLogFile != filePath)
+                {
+                    currentLogFile = filePath;
+                    headerWritten = false;
+                }
+                
+                if (!headerWritten)
+                {
+                    using (StreamWriter writer = new StreamWriter(filePath, false))
+                    {
+                        writer.WriteLine("DateTime,High,Low,Close,Open,Hour_Of_Day," +
+                                       "MACD_Above_Zero,MACD_Above_Signal,MACD_Rising,ADX_Rising,DI_Bullish,Price_Above_EMA," +
+                                       "MACD_Signal_Above_Zero,Both_MACD_And_Signal_Above_Zero,ADX_Rising_Consecutive," +
+                                       "Long_Condition_Count,Short_Condition_Count,InLongTrend,InShortTrend," +
+                                       "LongSignalTriggered,ShortSignalTriggered,LongExit,ShortExit," +
+                                       "MACD_Value,MACD_Signal,ADX_Value,DI_Plus,DI_Minus,EMA_Value," +
+                                       "MACD_Distance_Above_Zero,MACD_Signal_Distance_Above_Zero,DI_Spread,Price_Distance_Above_EMA," +
+                                       "ATR_At_Signal,Consecutive_Rising_Bars,Bars_In_Trend," +
+                                       "Entry_Price,Max_Favorable_Move,Max_Adverse_Move,Quality_ADX," +
+                                       "MACD_Momentum_Loss,ADX_Weakening,DI_Weakening");
+                    }
+                    headerWritten = true;
+                }
+                
+                double macdDistanceAboveZero = Math.Max(0, macdValue);
+                double macdSignalDistanceAboveZero = Math.Max(0, macdAvg);
+                double diSpread = diPlus - diMinus;
+                double priceDistanceAboveEMA = ((Close[0] - emaValue) / emaValue) * 100;
+                double atrValue = atr[0];
+                
+                // Quality ADX - simplified to true since ADX Quality Mode was removed
+                bool qualityADX = true;
+                
+                using (StreamWriter writer = new StreamWriter(filePath, true))
+                {
+                    string logLine = $"{barTime:yyyy-MM-dd HH:mm:ss},{High[0]:F2},{Low[0]:F2},{Close[0]:F2},{Open[0]:F2},{barTime.Hour}," +
+                                   $"{longCondition1},{longCondition2},{longCondition3},{longCondition4},{longCondition5},{longCondition6}," +
+                                   $"{macdAvg > 0},{(longCondition1 && macdAvg > 0)},{adxRisingConsecutive}," +
+                                   $"{longConditionCount},{shortConditionCount},{inLongTrend},{inShortTrend}," +
+                                   $"{currentLongSignal},{currentShortSignal},{longExit},{shortExit}," +
+                                   $"{macdValue:F4},{macdAvg:F4},{adx:F2},{diPlus:F2},{diMinus:F2},{emaValue:F2}," +
+                                   $"{macdDistanceAboveZero:F4},{macdSignalDistanceAboveZero:F4},{diSpread:F2},{priceDistanceAboveEMA:F2}," +
+                                   $"{atrValue:F2},{consecutiveRisingBars},{barsInTrend}," +
+                                   $"{entryPrice:F2},{maxFavorableMove:F2},{maxAdverseMove:F2},{qualityADX}," +
+                                   $"{macdMomentumLoss},{adxWeakening},{diWeakening}";
+                    writer.WriteLine(logLine);
+                }
+            }
+            catch (Exception ex)
+            {
+                Print($"Data logging error: {ex.Message}");
+            }
+        }
+        
+        private string DetermineChartTypeFolder()
+        {
+            try
+            {
+                string chartType = BarsPeriod.BarsPeriodType.ToString();
+                int periodValue = BarsPeriod.Value;
+                
+                if ((int)BarsPeriod.BarsPeriodType == 12345)
+                {
+                    if (BarsPeriod.Value2 > 0)
+                        return $"NR{BarsPeriod.Value}{BarsPeriod.Value2}";
+                    else
+                        return $"NR{BarsPeriod.Value}";
+                }
+                
+                switch (BarsPeriod.BarsPeriodType)
+                {
+                    case BarsPeriodType.Minute:
+                        return $"M{periodValue}";
+                    case BarsPeriodType.Second:
+                        return $"S{periodValue}";
+                    case BarsPeriodType.Tick:
+                        return $"{periodValue}T";
+                    case BarsPeriodType.Volume:
+                        return $"{periodValue}V";
+                    case BarsPeriodType.Range:
+                        return $"R{periodValue}";
+                    case BarsPeriodType.Renko:
+                        return $"R{(int)BarsPeriod.Value}";
+                    default:
+                        return chartType;
+                }
+            }
+            catch (Exception ex)
+            {
+                Print($"Chart type detection error: {ex.Message}");
+                return "Unknown";
             }
         }
 
@@ -475,6 +689,12 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
         }
         #endregion
 
+        #region Data Tracking Settings
+        [NinjaScriptProperty]
+        [Display(Name = "Enable Data Tracking", Order = 1, GroupName = "Data Tracking Settings")]
+        public bool EnableDataTracking { get; set; }
+        #endregion
+
         #endregion
     }
 }
@@ -486,18 +706,18 @@ namespace NinjaTrader.NinjaScript.Indicators
 	public partial class Indicator : NinjaTrader.Gui.NinjaScript.IndicatorRenderBase
 	{
 		private Myindicators.TrendSpotter[] cacheTrendSpotter;
-		public Myindicators.TrendSpotter TrendSpotter(int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, int emaPeriod, bool showEntrySignals, bool showExitSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor)
+		public Myindicators.TrendSpotter TrendSpotter(int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, int emaPeriod, bool showEntrySignals, bool showExitSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enableDataTracking)
 		{
-			return TrendSpotter(Input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, emaPeriod, showEntrySignals, showExitSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor);
+			return TrendSpotter(Input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, emaPeriod, showEntrySignals, showExitSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor, enableDataTracking);
 		}
 
-		public Myindicators.TrendSpotter TrendSpotter(ISeries<double> input, int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, int emaPeriod, bool showEntrySignals, bool showExitSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor)
+		public Myindicators.TrendSpotter TrendSpotter(ISeries<double> input, int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, int emaPeriod, bool showEntrySignals, bool showExitSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enableDataTracking)
 		{
 			if (cacheTrendSpotter != null)
 				for (int idx = 0; idx < cacheTrendSpotter.Length; idx++)
-					if (cacheTrendSpotter[idx] != null && cacheTrendSpotter[idx].MacdFast == macdFast && cacheTrendSpotter[idx].MacdSlow == macdSlow && cacheTrendSpotter[idx].MacdSmooth == macdSmooth && cacheTrendSpotter[idx].MacdMAType == macdMAType && cacheTrendSpotter[idx].DmPeriod == dmPeriod && cacheTrendSpotter[idx].AdxRisingBars == adxRisingBars && cacheTrendSpotter[idx].EmaPeriod == emaPeriod && cacheTrendSpotter[idx].ShowEntrySignals == showEntrySignals && cacheTrendSpotter[idx].ShowExitSignals == showExitSignals && cacheTrendSpotter[idx].Signal_Offset == signal_Offset && cacheTrendSpotter[idx].LongOn == longOn && cacheTrendSpotter[idx].ShortOn == shortOn && cacheTrendSpotter[idx].LongOff == longOff && cacheTrendSpotter[idx].ShortOff == shortOff && cacheTrendSpotter[idx].PartialSignalColor == partialSignalColor && cacheTrendSpotter[idx].PartialSignalOpacity == partialSignalOpacity && cacheTrendSpotter[idx].LongEntryColor == longEntryColor && cacheTrendSpotter[idx].ShortEntryColor == shortEntryColor && cacheTrendSpotter[idx].ExitColor == exitColor && cacheTrendSpotter[idx].EqualsInput(input))
+					if (cacheTrendSpotter[idx] != null && cacheTrendSpotter[idx].MacdFast == macdFast && cacheTrendSpotter[idx].MacdSlow == macdSlow && cacheTrendSpotter[idx].MacdSmooth == macdSmooth && cacheTrendSpotter[idx].MacdMAType == macdMAType && cacheTrendSpotter[idx].DmPeriod == dmPeriod && cacheTrendSpotter[idx].AdxRisingBars == adxRisingBars && cacheTrendSpotter[idx].EmaPeriod == emaPeriod && cacheTrendSpotter[idx].ShowEntrySignals == showEntrySignals && cacheTrendSpotter[idx].ShowExitSignals == showExitSignals && cacheTrendSpotter[idx].Signal_Offset == signal_Offset && cacheTrendSpotter[idx].LongOn == longOn && cacheTrendSpotter[idx].ShortOn == shortOn && cacheTrendSpotter[idx].LongOff == longOff && cacheTrendSpotter[idx].ShortOff == shortOff && cacheTrendSpotter[idx].PartialSignalColor == partialSignalColor && cacheTrendSpotter[idx].PartialSignalOpacity == partialSignalOpacity && cacheTrendSpotter[idx].LongEntryColor == longEntryColor && cacheTrendSpotter[idx].ShortEntryColor == shortEntryColor && cacheTrendSpotter[idx].ExitColor == exitColor && cacheTrendSpotter[idx].EnableDataTracking == enableDataTracking && cacheTrendSpotter[idx].EqualsInput(input))
 						return cacheTrendSpotter[idx];
-			return CacheIndicator<Myindicators.TrendSpotter>(new Myindicators.TrendSpotter(){ MacdFast = macdFast, MacdSlow = macdSlow, MacdSmooth = macdSmooth, MacdMAType = macdMAType, DmPeriod = dmPeriod, AdxRisingBars = adxRisingBars, EmaPeriod = emaPeriod, ShowEntrySignals = showEntrySignals, ShowExitSignals = showExitSignals, Signal_Offset = signal_Offset, LongOn = longOn, ShortOn = shortOn, LongOff = longOff, ShortOff = shortOff, PartialSignalColor = partialSignalColor, PartialSignalOpacity = partialSignalOpacity, LongEntryColor = longEntryColor, ShortEntryColor = shortEntryColor, ExitColor = exitColor }, input, ref cacheTrendSpotter);
+			return CacheIndicator<Myindicators.TrendSpotter>(new Myindicators.TrendSpotter(){ MacdFast = macdFast, MacdSlow = macdSlow, MacdSmooth = macdSmooth, MacdMAType = macdMAType, DmPeriod = dmPeriod, AdxRisingBars = adxRisingBars, EmaPeriod = emaPeriod, ShowEntrySignals = showEntrySignals, ShowExitSignals = showExitSignals, Signal_Offset = signal_Offset, LongOn = longOn, ShortOn = shortOn, LongOff = longOff, ShortOff = shortOff, PartialSignalColor = partialSignalColor, PartialSignalOpacity = partialSignalOpacity, LongEntryColor = longEntryColor, ShortEntryColor = shortEntryColor, ExitColor = exitColor, EnableDataTracking = enableDataTracking }, input, ref cacheTrendSpotter);
 		}
 	}
 }
@@ -506,14 +726,14 @@ namespace NinjaTrader.NinjaScript.MarketAnalyzerColumns
 {
 	public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
 	{
-		public Indicators.Myindicators.TrendSpotter TrendSpotter(int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, int emaPeriod, bool showEntrySignals, bool showExitSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor)
+		public Indicators.Myindicators.TrendSpotter TrendSpotter(int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, int emaPeriod, bool showEntrySignals, bool showExitSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enableDataTracking)
 		{
-			return indicator.TrendSpotter(Input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, emaPeriod, showEntrySignals, showExitSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor);
+			return indicator.TrendSpotter(Input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, emaPeriod, showEntrySignals, showExitSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor, enableDataTracking);
 		}
 
-		public Indicators.Myindicators.TrendSpotter TrendSpotter(ISeries<double> input , int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, int emaPeriod, bool showEntrySignals, bool showExitSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor)
+		public Indicators.Myindicators.TrendSpotter TrendSpotter(ISeries<double> input , int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, int emaPeriod, bool showEntrySignals, bool showExitSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enableDataTracking)
 		{
-			return indicator.TrendSpotter(input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, emaPeriod, showEntrySignals, showExitSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor);
+			return indicator.TrendSpotter(input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, emaPeriod, showEntrySignals, showExitSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor, enableDataTracking);
 		}
 	}
 }
@@ -522,14 +742,14 @@ namespace NinjaTrader.NinjaScript.Strategies
 {
 	public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
 	{
-		public Indicators.Myindicators.TrendSpotter TrendSpotter(int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, int emaPeriod, bool showEntrySignals, bool showExitSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor)
+		public Indicators.Myindicators.TrendSpotter TrendSpotter(int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, int emaPeriod, bool showEntrySignals, bool showExitSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enableDataTracking)
 		{
-			return indicator.TrendSpotter(Input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, emaPeriod, showEntrySignals, showExitSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor);
+			return indicator.TrendSpotter(Input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, emaPeriod, showEntrySignals, showExitSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor, enableDataTracking);
 		}
 
-		public Indicators.Myindicators.TrendSpotter TrendSpotter(ISeries<double> input , int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, int emaPeriod, bool showEntrySignals, bool showExitSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor)
+		public Indicators.Myindicators.TrendSpotter TrendSpotter(ISeries<double> input , int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, int emaPeriod, bool showEntrySignals, bool showExitSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enableDataTracking)
 		{
-			return indicator.TrendSpotter(input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, emaPeriod, showEntrySignals, showExitSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor);
+			return indicator.TrendSpotter(input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, emaPeriod, showEntrySignals, showExitSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor, enableDataTracking);
 		}
 	}
 }
