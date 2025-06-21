@@ -1,0 +1,267 @@
+My workspace
+View
+context
+Thank you for sharing your detailed NinjaScript indicator code. It’s a well-structured, feature-rich trend spotting indicator with multi-condition entry/exit logic, volume filtering, extensive tracking, and logging.
+
+Below is a comprehensive review focusing on performance optimization and resource usage improvements while keeping the core functionality intact:
+
+1. General Observations
+The indicator uses Calculate.OnBarClose which is good for performance since recalculations skip incomplete bars.
+It uses built-in indicators (MACD, DM, EMA, ATR, SMA) efficiently by instantiating them once at DataLoaded.
+Custom calculations like SMA-based MACD variant are computed only when necessary.
+Extensive logging may slow performance due to file I/O at every bar during market hours.
+2. Detailed Optimization Suggestions
+A. Minimize Expensive Calls in OnBarUpdate
+Currently:
+You call SMA(MacdFast)[0], SMA(MacdSlow)[0], and SMA(macdLine, MacdSmooth)[0] repeatedly inside OnBarUpdate.
+
+Suggestion:
+Instead of calling SMA(...) multiple times per bar, instantiate all needed SMA indicators once at OnStateChange(State.DataLoaded):
+
+ copy
+csharp
+
+private SMA fastSMA;
+private SMA slowSMA;
+private SMA signalSMA;
+
+protected override void OnStateChange()
+{
+    if (State == State.DataLoaded)
+    {
+        fastSMA = SMA(MacdFast);
+        slowSMA = SMA(MacdSlow);
+        signalSMA = SMA(null, MacdSmooth); // We'll assign input series below
+    }
+}
+Then in OnBarUpdate:
+
+ copy
+csharp
+
+fastMA[0] = fastSMA[0];
+slowMA[0] = slowSMA[0];
+macdLine[0] = fastMA[0] - slowMA[0];
+
+if (CurrentBar >= MacdSmooth - 1)
+    signalLine[0] = signalSMA[0];
+else
+    signalLine[0] = macdLine[0];
+Note: signalSMA needs to have macdLine as input series. To do custom SMA on macdLine (a Series<double>), create custom SMA and update it manually, or implement a cached SMA calculation to avoid repeated constructions.
+
+Reason:
+Repeatedly calling SMA() creates new instances or recalculates internally each time, causing overhead. Pre-initializing improves efficiency.
+
+B. Reduce Repeated Draw Calls
+Arrows and text drawings are created every bar for signals:
+
+ copy
+csharp
+
+Draw.ArrowUp(this, LongOn + CurrentBar.ToString(), ...);
+Draw.Text(this, LongOff + CurrentBar, ...);
+Suggestion:
+Drawings with unique names using CurrentBar lead to a growing number of graphics objects on chart, possibly slowing UI.
+
+Use fixed keys or clear old drawings when signals change rather than creating new ones every bar:
+
+ copy
+csharp
+
+private string longEntryTag = "LongEntryArrow";
+private string shortEntryTag = "ShortEntryArrow";
+private string longExitTag = "LongExitText";
+private string shortExitTag = "ShortExitText";
+
+// Before drawing new arrows/text, remove old ones:
+RemoveDrawObject(longEntryTag);
+RemoveDrawObject(shortEntryTag);
+RemoveDrawObject(longExitTag);
+RemoveDrawObject(shortExitTag);
+
+if(currentLongSignal && !wasLongSignal)
+    Draw.ArrowUp(this, longEntryTag, true, 0, Low[0] - Signal_Offset * TickSize, LongEntryColor);
+
+// Similarly for others...
+Benefit:
+Keeps drawings count constant, reducing rendering load.
+
+C. Streamline the ADX Rising Check
+You perform two loops for checking ADX rising bars — one general adxRising, and one adxRisingConsecutive.
+
+Suggestion:
+
+Reduce to one efficient check or cache the required ADX values in variables before loops to avoid repeated calls to dm.ADXPlot[i].
+
+For example:
+
+ copy
+csharp
+
+bool adxRising = true;
+for (int i = 1; i <= AdxRisingBars; i++)
+{
+    if (dm.ADXPlot[0] <= dm.ADXPlot[i])
+    {
+        adxRising = false;
+        break;
+    }
+}
+This code is fine but consider avoiding multiple loops if not both are required or merge their logic.
+
+D. Avoid Repeated Calculations of VolumeSMA[0]
+You call volumeSMA[0] multiple times per bar in OnBarUpdate and also inside logging.
+
+Suggestion:
+
+Cache volumeSMA[0] in a local variable at the start of OnBarUpdate for reuse.
+
+E. Combined Conditions Counting
+You count conditions like:
+
+ copy
+csharp
+
+longConditionCount = (longCondition1 ? 1 : 0) + ... + (longCondition6 ? 1 : 0);
+Suggestion:
+
+This is fine for readability, but for performance you may:
+
+Store true or false in a bool array and then sum number of trues with LINQ .Count(x => x) only if the count of conditions grows significantly.
+Not a big priority but something to consider if conditions grow.
+
+F. Optimize Data Logging
+Your logging opens, writes, and closes a file on every bar during market hours:
+
+ copy
+csharp
+
+using (StreamWriter writer = new StreamWriter(filePath, true))
+{
+    writer.WriteLine(logLine);
+}
+File I/O is expensive and can slow down overall performance.
+
+Suggestions:
+
+Buffer logging: Accumulate log lines in a local list and write to file in batches on OnTermination() or every N bars.
+ copy
+csharp
+
+private List<string> logBuffer = new List<string>();
+
+// In OnBarUpdate
+logBuffer.Add(logLine);
+
+// Flush to file periodically or in OnTermination
+private void FlushLogBuffer()
+{
+    if (logBuffer.Count == 0) return;
+    File.AppendAllLines(currentLogFile, logBuffer);
+    logBuffer.Clear();
+}
+Write a flush method and call it in OnTermination() or periodically (e.g., every 50 bars).
+
+Alternatively, if real-time logging is essential, consider asynchronous writing or separate thread, but NinjaScript environment restricts threading, so buffering is safest.
+
+Benefit:
+Significantly reduces file I/O overhead and potential UI freezes.
+
+G. Avoid Complex String Operations Inside OnBarUpdate
+Formatting strings with many concatenations and interpolations dynamically every bar may impact performance.
+
+Suggestion: Use StringBuilder or pre-format static parts of the string, or cache any repetitive static values outside the method.
+
+H. Use IsFirstTickOfBar Check if you switch to Calculate.OnEachTick
+Since you are at Calculate.OnBarClose, no need to check this, but keep in mind if you switch later.
+I. Series Usage
+Since you use series like fastMA, slowMA, macdLine, and signalLine but only assign current [0] values and read previous bars, consider if these can be eliminated in favor of simpler variables or only use them where needed.
+
+E.g.: Instead of storing in series just for one bar, local variables may suffice if not referenced across bars.
+
+3. Code Snippet Examples for Key Suggestions
+a) Pre-Create and Use SMA Indicators for Custom MACD
+ copy
+csharp
+
+// Member variables
+private SMA fastSMA;
+private SMA slowSMA;
+private SMA signalSMA;
+private Series<double> macdLine;
+
+protected override void OnStateChange()
+{
+    if (State == State.DataLoaded)
+    {
+        if (MacdMAType != CustomEnumNamespace.UniversalMovingAverage.EMA)
+        {
+            fastSMA = SMA(MacdFast);
+            slowSMA = SMA(MacdSlow);
+            macdLine = new Series<double>(this);
+            signalSMA = SMA(macdLine, MacdSmooth);
+        }
+    }
+}
+
+protected override void OnBarUpdate()
+{
+    if (MacdMAType != CustomEnumNamespace.UniversalMovingAverage.EMA)
+    {
+        macdLine[0] = fastSMA[0] - slowSMA[0];
+
+        double signalVal = (CurrentBar >= MacdSmooth - 1) ? signalSMA[0] : macdLine[0];
+
+        // Use macdLine[0] and signalVal for logic
+    }
+}
+ copy
+b) Buffered Logging Example
+ copy
+csharp
+
+private List<string> logBuffer = new List<string>();
+private int logFlushBars = 50;
+
+protected override void OnBarUpdate()
+{
+    // ... existing logic ...
+
+    if (EnableDataTracking)
+    {
+        string logLine = ComposeLogLine(...);
+        logBuffer.Add(logLine);
+
+        if (logBuffer.Count >= logFlushBars)
+            FlushLogBuffer();
+    }
+}
+
+private void FlushLogBuffer()
+{
+    try
+    {
+        if (logBuffer.Count > 0)
+        {
+            File.AppendAllLines(currentLogFile, logBuffer);
+            logBuffer.Clear();
+        }
+    }
+    catch (Exception ex)
+    {
+        Print($"Error flushing log buffer: {ex.Message}");
+    }
+}
+
+protected override void OnTermination()
+{
+    FlushLogBuffer();
+    base.OnTermination();
+}
+ copy
+4. Final Recommendations
+Profile memory and CPU usage using NinjaTrader’s Performance Profiler or Visual Studio diagnostics to focus on bottlenecks.
+Keep code readability balanced with optimization.
+Avoid unnecessary object allocations inside OnBarUpdate.
+Minimize Draw calls by reusing tags or updating/removing old drawings rather than creating new ones each bar.
+Batch file I/O to minimize impact.
