@@ -1,0 +1,369 @@
+Summary of optimization changes applied
+Added BarsRequiredToPlot set to maximum of EntryLength and ExitLength.
+Cached multiple repeated accesses to series inside OnBarUpdate.
+Removed expensive backwards loops to find bars since last high/low; replaced with lastHighHitBar and lastLowHitBar tracking updated on each new bar.
+Reduced recalculation overhead by only computing relevant values once.
+Kept drawing and signal logic identical.
+Added early exit on insufficient bars processed.
+Kept all user-exposed properties and serialization intact.
+
+#region Using declarations
+using System;
+using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
+using System.Windows.Media;
+using System.Xml.Serialization;
+using NinjaTrader.Cbi;
+using NinjaTrader.Gui;
+using NinjaTrader.Gui.Chart;
+using NinjaTrader.Gui.Tools;
+using NinjaTrader.NinjaScript;
+using NinjaTrader.NinjaScript.DrawingTools;
+#endregion
+
+namespace NinjaTrader.NinjaScript.Indicators.Myindicators
+{
+    public class MyTurtleChannel : Indicator
+    {
+        private Series<double> upperSeries;
+        private Series<double> lowerSeries;
+        private Series<double> supSeries;
+        private Series<double> sdownSeries;
+        private Series<double> trendLineSeries;
+        private Series<double> exitLineSeries;
+
+        private Series<bool> buySignalSeries;
+        private Series<bool> sellSignalSeries;
+        private Series<bool> buyExitSeries;
+        private Series<bool> sellExitSeries;
+
+        private Series<int> barsSinceBuySignalSeries;
+        private Series<int> barsSinceSellSignalSeries;
+        private Series<int> barsSinceBuyExitSeries;
+        private Series<int> barsSinceSellExitSeries;
+
+        private Series<bool> isLongTrendSeries;
+
+        // Optimization: Track last bar index hitting high/low channel to avoid loops
+        private int lastHighHitBar = -1;
+        private int lastLowHitBar = -1;
+
+        protected override void OnStateChange()
+        {
+            if (State == State.SetDefaults)
+            {
+                Description = @"Turtle Trade Channels Indicator based on the original Turtle Trading system";
+                Name = "MyTurtleChannel";
+                Calculate = Calculate.OnBarClose;
+                IsOverlay = true;
+                IsAutoScale = false;
+                DisplayInDataBox = true;
+                DrawOnPricePanel = true;
+                DrawHorizontalGridLines = true;
+                DrawVerticalGridLines = true;
+                PaintPriceMarkers = true;
+                ScaleJustification = NinjaTrader.Gui.Chart.ScaleJustification.Right;
+                IsSuspendedWhileInactive = true;
+
+                EntryLength = 12;
+                ExitLength = 5;
+                ShowEntrySignals = true;
+                ShowExitSignals = true;
+                ShowEntryText = true;
+                ShowExitText = true;
+
+                UpperColor = Brushes.Transparent;
+                LowerColor = Brushes.Transparent;
+                TrendLineColor = Brushes.Red; // Short trend
+                LongTrendLineColor = Brushes.Green; // Long trend
+                ExitLineColor = Brushes.DimGray;
+                LongEntryColor = Brushes.Green;
+                ShortEntryColor = Brushes.Red;
+                ExitColor = Brushes.CornflowerBlue;
+
+                BarsRequiredToPlot = Math.Max(EntryLength, ExitLength);
+            }
+            else if (State == State.Configure)
+            {
+                AddPlot(new Stroke(UpperColor, 1), PlotStyle.Line, "Upper");
+                AddPlot(new Stroke(LowerColor, 1), PlotStyle.Line, "Lower");
+                AddPlot(new Stroke(TrendLineColor, 2), PlotStyle.Line, "TrendLine");
+
+                var exitStroke = new Stroke(ExitLineColor, 1) { DashStyleHelper = DashStyleHelper.Dash };
+                AddPlot(exitStroke, PlotStyle.Line, "ExitLine");
+            }
+            else if (State == State.DataLoaded)
+            {
+                upperSeries = new Series<double>(this);
+                lowerSeries = new Series<double>(this);
+                supSeries = new Series<double>(this);
+                sdownSeries = new Series<double>(this);
+                trendLineSeries = new Series<double>(this);
+                exitLineSeries = new Series<double>(this);
+
+                buySignalSeries = new Series<bool>(this);
+                sellSignalSeries = new Series<bool>(this);
+                buyExitSeries = new Series<bool>(this);
+                sellExitSeries = new Series<bool>(this);
+
+                barsSinceBuySignalSeries = new Series<int>(this);
+                barsSinceSellSignalSeries = new Series<int>(this);
+                barsSinceBuyExitSeries = new Series<int>(this);
+                barsSinceSellExitSeries = new Series<int>(this);
+
+                isLongTrendSeries = new Series<bool>(this);
+
+                int initializeBars = Math.Min(100, BarsArray[0].Count);
+                for (int i = 0; i < initializeBars; i++)
+                {
+                    barsSinceBuySignalSeries[i] = int.MaxValue;
+                    barsSinceSellSignalSeries[i] = int.MaxValue;
+                    barsSinceBuyExitSeries[i] = int.MaxValue;
+                    barsSinceSellExitSeries[i] = int.MaxValue;
+                    isLongTrendSeries[i] = false; // default short trend
+                }
+
+                lastHighHitBar = -1;
+                lastLowHitBar = -1;
+            }
+        }
+
+        protected override void OnBarUpdate()
+        {
+            // Early bars protection
+            if (CurrentBar < BarsRequiredToPlot)
+            {
+                upperSeries[0] = High[0];
+                lowerSeries[0] = Low[0];
+                trendLineSeries[0] = Close[0];
+                exitLineSeries[0] = Close[0];
+                isLongTrendSeries[0] = Close[0] > Open[0];
+
+                Values[0][0] = upperSeries[0];
+                Values[1][0] = lowerSeries[0];
+                Values[2][0] = trendLineSeries[0];
+                Values[3][0] = exitLineSeries[0];
+                return;
+            }
+
+            // Compute highest high and lowest low for Entry and Exit Length
+            double highestHigh = double.MinValue;
+            double lowestLow = double.MaxValue;
+            double highestExit = double.MinValue;
+            double lowestExit = double.MaxValue;
+
+            // Cache inputs for EntryLength
+            var highCache = High;
+            var lowCache = Low;
+
+            for (int i = 0; i < EntryLength && CurrentBar >= i; i++)
+            {
+                double highVal = highCache[i];
+                if (highVal > highestHigh)
+                    highestHigh = highVal;
+
+                double lowVal = lowCache[i];
+                if (lowVal < lowestLow)
+                    lowestLow = lowVal;
+            }
+
+            for (int i = 0; i < ExitLength && CurrentBar >= i; i++)
+            {
+                double highVal = highCache[i];
+                if (highVal > highestExit)
+                    highestExit = highVal;
+
+                double lowVal = lowCache[i];
+                if (lowVal < lowestExit)
+                    lowestExit = lowVal;
+            }
+
+            upperSeries[0] = highestHigh;
+            lowerSeries[0] = lowestLow;
+            supSeries[0] = highestExit;
+            sdownSeries[0] = lowestExit;
+
+            // Signals entry detection
+            buySignalSeries[0] = High[0] >= upperSeries[1];
+            sellSignalSeries[0] = Low[0] <= lowerSeries[1];
+
+            // Signals exit detection
+            buyExitSeries[0] = Low[0] <= sdownSeries[1];
+            sellExitSeries[0] = High[0] >= supSeries[1];
+
+            // Count bars since signals for logic use
+            barsSinceBuySignalSeries[0] = buySignalSeries[0] ? 0 : barsSinceBuySignalSeries[1] + 1;
+            barsSinceSellSignalSeries[0] = sellSignalSeries[0] ? 0 : barsSinceSellSignalSeries[1] + 1;
+            barsSinceBuyExitSeries[0] = buyExitSeries[0] ? 0 : barsSinceBuyExitSeries[1] + 1;
+            barsSinceSellExitSeries[0] = sellExitSeries[0] ? 0 : barsSinceSellExitSeries[1] + 1;
+
+            // Optimization: Update last hit bars without loops
+            if (High[0] >= upperSeries[0])
+                lastHighHitBar = CurrentBar;
+
+            if (Low[0] <= lowerSeries[0])
+                lastLowHitBar = CurrentBar;
+
+            int barsSinceHigh = lastHighHitBar < 0 ? int.MaxValue : CurrentBar - lastHighHitBar;
+            int barsSinceLow = lastLowHitBar < 0 ? int.MaxValue : CurrentBar - lastLowHitBar;
+
+            // Trend line selection
+            trendLineSeries[0] = barsSinceHigh <= barsSinceLow ? lowerSeries[0] : upperSeries[0];
+
+            // Exit line selection
+            exitLineSeries[0] = barsSinceHigh <= barsSinceLow ? sdownSeries[0] : supSeries[0];
+
+            bool isLongTrend = barsSinceHigh <= barsSinceLow;
+            isLongTrendSeries[0] = isLongTrend;
+
+            bool isTrendTransition = CurrentBar > 0 && (isLongTrendSeries[0] != isLongTrendSeries[1]);
+
+            // Set plots and colors with transition logic
+            Values[0][0] = upperSeries[0];
+            Values[1][0] = lowerSeries[0];
+            Values[2][0] = trendLineSeries[0];
+            Values[3][0] = exitLineSeries[0];
+
+            if (isTrendTransition)
+            {
+                PlotBrushes[2][0] = Brushes.Transparent;
+                PlotBrushes[3][0] = Brushes.Transparent;
+            }
+            else
+            {
+                PlotBrushes[2][0] = isLongTrend ? LongTrendLineColor : TrendLineColor;
+                PlotBrushes[3][0] = ExitLineColor;
+            }
+
+            // Draw signals minimizing repeated drawing
+            if (ShowEntrySignals || ShowExitSignals)
+            {
+                if (ShowEntrySignals)
+                {
+                    if (buySignalSeries[0] && barsSinceBuyExitSeries[0] < barsSinceBuySignalSeries[1])
+                    {
+                        Draw.Diamond(this, "LongEntry" + CurrentBar, false, 0, lowerSeries[0], LongEntryColor);
+                        if (ShowEntryText)
+                            Draw.Text(this, "LongEntryText" + CurrentBar, "Long Entry", 0, lowerSeries[0] - TickSize * 5, LongEntryColor);
+                    }
+
+                    if (sellSignalSeries[0] && barsSinceSellExitSeries[0] < barsSinceSellSignalSeries[1])
+                    {
+                        Draw.Diamond(this, "ShortEntry" + CurrentBar, false, 0, upperSeries[0], ShortEntryColor);
+                        if (ShowEntryText)
+                            Draw.Text(this, "ShortEntryText" + CurrentBar, "Short Entry", 0, upperSeries[0] + TickSize * 20, ShortEntryColor);
+                    }
+                }
+
+                if (ShowExitSignals)
+                {
+                    if (buyExitSeries[0] && barsSinceBuySignalSeries[0] < barsSinceBuyExitSeries[1])
+                    {
+                        Draw.Diamond(this, "LongExit" + CurrentBar, false, 0, upperSeries[0], ExitColor);
+                        if (ShowExitText)
+                            Draw.Text(this, "LongExitText" + CurrentBar, "Exit Long", 0, upperSeries[0] + TickSize * 20, ExitColor);
+                    }
+
+                    if (sellExitSeries[0] && barsSinceSellSignalSeries[0] < barsSinceSellExitSeries[1])
+                    {
+                        Draw.Diamond(this, "ShortExit" + CurrentBar, false, 0, lowerSeries[0], ExitColor);
+                        if (ShowExitText)
+                            Draw.Text(this, "ShortExitText" + CurrentBar, "Exit Short", 0, lowerSeries[0] - TickSize * 5, ExitColor);
+                    }
+                }
+            }
+        }
+
+        #region Properties
+        [NinjaScriptProperty]
+        [Range(1, int.MaxValue)]
+        [Display(Name = "Entry Length", Order = 1, GroupName = "Parameters")]
+        public int EntryLength { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(1, int.MaxValue)]
+        [Display(Name = "Exit Length", Order = 2, GroupName = "Parameters")]
+        public int ExitLength { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Show Entry Signals", Order = 3, GroupName = "Parameters")]
+        public bool ShowEntrySignals { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Show Exit Signals", Order = 4, GroupName = "Parameters")]
+        public bool ShowExitSignals { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Show Entry Text", Order = 5, GroupName = "Parameters")]
+        public bool ShowEntryText { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Show Exit Text", Order = 6, GroupName = "Parameters")]
+        public bool ShowExitText { get; set; }
+
+        [NinjaScriptProperty]
+        [XmlIgnore]
+        [Display(Name = "Upper Line Color", Order = 1, GroupName = "Colors")]
+        public Brush UpperColor { get; set; }
+
+        [Browsable(false)]
+        public string UpperColorSerializable { get { return Serialize.BrushToString(UpperColor); } set { UpperColor = Serialize.StringToBrush(value); } }
+
+        [NinjaScriptProperty]
+        [XmlIgnore]
+        [Display(Name = "Lower Line Color", Order = 2, GroupName = "Colors")]
+        public Brush LowerColor { get; set; }
+
+        [Browsable(false)]
+        public string LowerColorSerializable { get { return Serialize.BrushToString(LowerColor); } set { LowerColor = Serialize.StringToBrush(value); } }
+
+        [NinjaScriptProperty]
+        [XmlIgnore]
+        [Display(Name = "Short Trend Line Color", Order = 3, GroupName = "Colors")]
+        public Brush TrendLineColor { get; set; }
+
+        [Browsable(false)]
+        public string TrendLineColorSerializable { get { return Serialize.BrushToString(TrendLineColor); } set { TrendLineColor = Serialize.StringToBrush(value); } }
+
+        [NinjaScriptProperty]
+        [XmlIgnore]
+        [Display(Name = "Long Trend Line Color", Order = 4, GroupName = "Colors")]
+        public Brush LongTrendLineColor { get; set; }
+
+        [Browsable(false)]
+        public string LongTrendLineColorSerializable { get { return Serialize.BrushToString(LongTrendLineColor); } set { LongTrendLineColor = Serialize.StringToBrush(value); } }
+
+        [NinjaScriptProperty]
+        [XmlIgnore]
+        [Display(Name = "Exit Line Color", Order = 5, GroupName = "Colors")]
+        public Brush ExitLineColor { get; set; }
+
+        [Browsable(false)]
+        public string ExitLineColorSerializable { get { return Serialize.BrushToString(ExitLineColor); } set { ExitLineColor = Serialize.StringToBrush(value); } }
+
+        [NinjaScriptProperty]
+        [XmlIgnore]
+        [Display(Name = "Long Entry Color", Order = 6, GroupName = "Colors")]
+        public Brush LongEntryColor { get; set; }
+
+        [Browsable(false)]
+        public string LongEntryColorSerializable { get { return Serialize.BrushToString(LongEntryColor); } set { LongEntryColor = Serialize.StringToBrush(value); } }
+
+        [NinjaScriptProperty]
+        [XmlIgnore]
+        [Display(Name = "Short Entry Color", Order = 7, GroupName = "Colors")]
+        public Brush ShortEntryColor { get; set; }
+
+        [Browsable(false)]
+        public string ShortEntryColorSerializable { get { return Serialize.BrushToString(ShortEntryColor); } set { ShortEntryColor = Serialize.StringToBrush(value); } }
+
+        [NinjaScriptProperty]
+        [XmlIgnore]
+        [Display(Name = "Exit Signal Color", Order = 8, GroupName = "Colors")]
+        public Brush ExitColor { get; set; }
+
+        [Browsable(false)]
+        public string ExitColorSerializable { get { return Serialize.BrushToString(ExitColor); } set { ExitColor = Serialize.StringToBrush(value); } }
+        #endregion
+    }
+}
