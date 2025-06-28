@@ -1,6 +1,7 @@
-///Ultra-Optimized TrendSpotter with Split Performance/Optimization Tracking
-///Performance CSV: Trade-only logging (minimal overhead)
-///Optimization CSV: Optional detailed analysis (can be disabled)
+///6-19 Ultra-Optimized TrendSpotter with Split Performance/Optimization Tracking
+///6-28 Performance CSV: Trade-only logging (minimal overhead)
+///6-28 Optimization CSV: Optional detailed analysis (can be disabled)
+///6-28 added partial signal toggle
 #region Using declarations
 using System;
 using System.Collections.Generic;
@@ -129,6 +130,7 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                 // Signal Settings
                 ShowEntrySignals = true;
                 ShowExitSignals = true;
+                ShowPartialSignals = true;  // Default ON, can be disabled for performance
                 Signal_Offset = 5;
                 LongOn = "LongEntry";
                 ShortOn = "ShortEntry";
@@ -811,8 +813,11 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                                  High[0] + Signal_Offset * TickSize, ShortEntryColor);
                 }
 
-                // Optimized background color logic
-                SetBackgroundColor();
+                // Optimized background color logic - ONLY when partial signals enabled
+                if (ShowPartialSignals)
+                {
+                    SetBackgroundColor();
+                }
             }
 
             if (ShowExitSignals && CurrentBar > 1)
@@ -1100,24 +1105,28 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
         public bool ShowExitSignals { get; set; }
 
         [NinjaScriptProperty]
+        [Display(Name = "Show Partial Signals", Order = 3, GroupName = "Signal Settings")]
+        public bool ShowPartialSignals { get; set; }
+
+        [NinjaScriptProperty]
         [Range(0, double.MaxValue)]
-        [Display(Name = "Signal Offset", Order = 3, GroupName = "Signal Settings")]
+        [Display(Name = "Signal Offset", Order = 4, GroupName = "Signal Settings")]
         public double Signal_Offset { get; set; }
 
         [NinjaScriptProperty]
-        [Display(Name = "Long On", Order = 4, GroupName = "Signal Settings")]
+        [Display(Name = "Long On", Order = 5, GroupName = "Signal Settings")]
         public string LongOn { get; set; }
 
         [NinjaScriptProperty]
-        [Display(Name = "Short On", Order = 5, GroupName = "Signal Settings")]
+        [Display(Name = "Short On", Order = 6, GroupName = "Signal Settings")]
         public string ShortOn { get; set; }
 
         [NinjaScriptProperty]
-        [Display(Name = "Long Off", Order = 6, GroupName = "Signal Settings")]
+        [Display(Name = "Long Off", Order = 7, GroupName = "Signal Settings")]
         public string LongOff { get; set; }
 
         [NinjaScriptProperty]
-        [Display(Name = "Short Off", Order = 7, GroupName = "Signal Settings")]
+        [Display(Name = "Short Off", Order = 8, GroupName = "Signal Settings")]
         public string ShortOff { get; set; }
 
         [NinjaScriptProperty]
@@ -1205,18 +1214,18 @@ namespace NinjaTrader.NinjaScript.Indicators
 	public partial class Indicator : NinjaTrader.Gui.NinjaScript.IndicatorRenderBase
 	{
 		private Myindicators.TrendSpotter[] cacheTrendSpotter;
-		public Myindicators.TrendSpotter TrendSpotter(int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, int emaPeriod, double volumeFilterMultiplier, bool showEntrySignals, bool showExitSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialLongSignalColor, Brush partialShortSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enablePerformanceTracking, bool enableOptimizationTracking)
+		public Myindicators.TrendSpotter TrendSpotter(int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, int emaPeriod, double volumeFilterMultiplier, bool showEntrySignals, bool showExitSignals, bool showPartialSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialLongSignalColor, Brush partialShortSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enablePerformanceTracking, bool enableOptimizationTracking)
 		{
-			return TrendSpotter(Input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, emaPeriod, volumeFilterMultiplier, showEntrySignals, showExitSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialLongSignalColor, partialShortSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor, enablePerformanceTracking, enableOptimizationTracking);
+			return TrendSpotter(Input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, emaPeriod, volumeFilterMultiplier, showEntrySignals, showExitSignals, showPartialSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialLongSignalColor, partialShortSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor, enablePerformanceTracking, enableOptimizationTracking);
 		}
 
-		public Myindicators.TrendSpotter TrendSpotter(ISeries<double> input, int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, int emaPeriod, double volumeFilterMultiplier, bool showEntrySignals, bool showExitSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialLongSignalColor, Brush partialShortSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enablePerformanceTracking, bool enableOptimizationTracking)
+		public Myindicators.TrendSpotter TrendSpotter(ISeries<double> input, int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, int emaPeriod, double volumeFilterMultiplier, bool showEntrySignals, bool showExitSignals, bool showPartialSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialLongSignalColor, Brush partialShortSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enablePerformanceTracking, bool enableOptimizationTracking)
 		{
 			if (cacheTrendSpotter != null)
 				for (int idx = 0; idx < cacheTrendSpotter.Length; idx++)
-					if (cacheTrendSpotter[idx] != null && cacheTrendSpotter[idx].MacdFast == macdFast && cacheTrendSpotter[idx].MacdSlow == macdSlow && cacheTrendSpotter[idx].MacdSmooth == macdSmooth && cacheTrendSpotter[idx].MacdMAType == macdMAType && cacheTrendSpotter[idx].DmPeriod == dmPeriod && cacheTrendSpotter[idx].AdxRisingBars == adxRisingBars && cacheTrendSpotter[idx].EmaPeriod == emaPeriod && cacheTrendSpotter[idx].VolumeFilterMultiplier == volumeFilterMultiplier && cacheTrendSpotter[idx].ShowEntrySignals == showEntrySignals && cacheTrendSpotter[idx].ShowExitSignals == showExitSignals && cacheTrendSpotter[idx].Signal_Offset == signal_Offset && cacheTrendSpotter[idx].LongOn == longOn && cacheTrendSpotter[idx].ShortOn == shortOn && cacheTrendSpotter[idx].LongOff == longOff && cacheTrendSpotter[idx].ShortOff == shortOff && cacheTrendSpotter[idx].PartialLongSignalColor == partialLongSignalColor && cacheTrendSpotter[idx].PartialShortSignalColor == partialShortSignalColor && cacheTrendSpotter[idx].PartialSignalOpacity == partialSignalOpacity && cacheTrendSpotter[idx].LongEntryColor == longEntryColor && cacheTrendSpotter[idx].ShortEntryColor == shortEntryColor && cacheTrendSpotter[idx].ExitColor == exitColor && cacheTrendSpotter[idx].EnablePerformanceTracking == enablePerformanceTracking && cacheTrendSpotter[idx].EnableOptimizationTracking == enableOptimizationTracking && cacheTrendSpotter[idx].EqualsInput(input))
+					if (cacheTrendSpotter[idx] != null && cacheTrendSpotter[idx].MacdFast == macdFast && cacheTrendSpotter[idx].MacdSlow == macdSlow && cacheTrendSpotter[idx].MacdSmooth == macdSmooth && cacheTrendSpotter[idx].MacdMAType == macdMAType && cacheTrendSpotter[idx].DmPeriod == dmPeriod && cacheTrendSpotter[idx].AdxRisingBars == adxRisingBars && cacheTrendSpotter[idx].EmaPeriod == emaPeriod && cacheTrendSpotter[idx].VolumeFilterMultiplier == volumeFilterMultiplier && cacheTrendSpotter[idx].ShowEntrySignals == showEntrySignals && cacheTrendSpotter[idx].ShowExitSignals == showExitSignals && cacheTrendSpotter[idx].ShowPartialSignals == showPartialSignals && cacheTrendSpotter[idx].Signal_Offset == signal_Offset && cacheTrendSpotter[idx].LongOn == longOn && cacheTrendSpotter[idx].ShortOn == shortOn && cacheTrendSpotter[idx].LongOff == longOff && cacheTrendSpotter[idx].ShortOff == shortOff && cacheTrendSpotter[idx].PartialLongSignalColor == partialLongSignalColor && cacheTrendSpotter[idx].PartialShortSignalColor == partialShortSignalColor && cacheTrendSpotter[idx].PartialSignalOpacity == partialSignalOpacity && cacheTrendSpotter[idx].LongEntryColor == longEntryColor && cacheTrendSpotter[idx].ShortEntryColor == shortEntryColor && cacheTrendSpotter[idx].ExitColor == exitColor && cacheTrendSpotter[idx].EnablePerformanceTracking == enablePerformanceTracking && cacheTrendSpotter[idx].EnableOptimizationTracking == enableOptimizationTracking && cacheTrendSpotter[idx].EqualsInput(input))
 						return cacheTrendSpotter[idx];
-			return CacheIndicator<Myindicators.TrendSpotter>(new Myindicators.TrendSpotter(){ MacdFast = macdFast, MacdSlow = macdSlow, MacdSmooth = macdSmooth, MacdMAType = macdMAType, DmPeriod = dmPeriod, AdxRisingBars = adxRisingBars, EmaPeriod = emaPeriod, VolumeFilterMultiplier = volumeFilterMultiplier, ShowEntrySignals = showEntrySignals, ShowExitSignals = showExitSignals, Signal_Offset = signal_Offset, LongOn = longOn, ShortOn = shortOn, LongOff = longOff, ShortOff = shortOff, PartialLongSignalColor = partialLongSignalColor, PartialShortSignalColor = partialShortSignalColor, PartialSignalOpacity = partialSignalOpacity, LongEntryColor = longEntryColor, ShortEntryColor = shortEntryColor, ExitColor = exitColor, EnablePerformanceTracking = enablePerformanceTracking, EnableOptimizationTracking = enableOptimizationTracking }, input, ref cacheTrendSpotter);
+			return CacheIndicator<Myindicators.TrendSpotter>(new Myindicators.TrendSpotter(){ MacdFast = macdFast, MacdSlow = macdSlow, MacdSmooth = macdSmooth, MacdMAType = macdMAType, DmPeriod = dmPeriod, AdxRisingBars = adxRisingBars, EmaPeriod = emaPeriod, VolumeFilterMultiplier = volumeFilterMultiplier, ShowEntrySignals = showEntrySignals, ShowExitSignals = showExitSignals, ShowPartialSignals = showPartialSignals, Signal_Offset = signal_Offset, LongOn = longOn, ShortOn = shortOn, LongOff = longOff, ShortOff = shortOff, PartialLongSignalColor = partialLongSignalColor, PartialShortSignalColor = partialShortSignalColor, PartialSignalOpacity = partialSignalOpacity, LongEntryColor = longEntryColor, ShortEntryColor = shortEntryColor, ExitColor = exitColor, EnablePerformanceTracking = enablePerformanceTracking, EnableOptimizationTracking = enableOptimizationTracking }, input, ref cacheTrendSpotter);
 		}
 	}
 }
@@ -1225,14 +1234,14 @@ namespace NinjaTrader.NinjaScript.MarketAnalyzerColumns
 {
 	public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
 	{
-		public Indicators.Myindicators.TrendSpotter TrendSpotter(int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, int emaPeriod, double volumeFilterMultiplier, bool showEntrySignals, bool showExitSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialLongSignalColor, Brush partialShortSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enablePerformanceTracking, bool enableOptimizationTracking)
+		public Indicators.Myindicators.TrendSpotter TrendSpotter(int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, int emaPeriod, double volumeFilterMultiplier, bool showEntrySignals, bool showExitSignals, bool showPartialSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialLongSignalColor, Brush partialShortSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enablePerformanceTracking, bool enableOptimizationTracking)
 		{
-			return indicator.TrendSpotter(Input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, emaPeriod, volumeFilterMultiplier, showEntrySignals, showExitSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialLongSignalColor, partialShortSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor, enablePerformanceTracking, enableOptimizationTracking);
+			return indicator.TrendSpotter(Input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, emaPeriod, volumeFilterMultiplier, showEntrySignals, showExitSignals, showPartialSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialLongSignalColor, partialShortSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor, enablePerformanceTracking, enableOptimizationTracking);
 		}
 
-		public Indicators.Myindicators.TrendSpotter TrendSpotter(ISeries<double> input , int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, int emaPeriod, double volumeFilterMultiplier, bool showEntrySignals, bool showExitSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialLongSignalColor, Brush partialShortSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enablePerformanceTracking, bool enableOptimizationTracking)
+		public Indicators.Myindicators.TrendSpotter TrendSpotter(ISeries<double> input , int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, int emaPeriod, double volumeFilterMultiplier, bool showEntrySignals, bool showExitSignals, bool showPartialSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialLongSignalColor, Brush partialShortSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enablePerformanceTracking, bool enableOptimizationTracking)
 		{
-			return indicator.TrendSpotter(input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, emaPeriod, volumeFilterMultiplier, showEntrySignals, showExitSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialLongSignalColor, partialShortSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor, enablePerformanceTracking, enableOptimizationTracking);
+			return indicator.TrendSpotter(input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, emaPeriod, volumeFilterMultiplier, showEntrySignals, showExitSignals, showPartialSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialLongSignalColor, partialShortSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor, enablePerformanceTracking, enableOptimizationTracking);
 		}
 	}
 }
@@ -1241,14 +1250,14 @@ namespace NinjaTrader.NinjaScript.Strategies
 {
 	public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
 	{
-		public Indicators.Myindicators.TrendSpotter TrendSpotter(int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, int emaPeriod, double volumeFilterMultiplier, bool showEntrySignals, bool showExitSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialLongSignalColor, Brush partialShortSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enablePerformanceTracking, bool enableOptimizationTracking)
+		public Indicators.Myindicators.TrendSpotter TrendSpotter(int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, int emaPeriod, double volumeFilterMultiplier, bool showEntrySignals, bool showExitSignals, bool showPartialSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialLongSignalColor, Brush partialShortSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enablePerformanceTracking, bool enableOptimizationTracking)
 		{
-			return indicator.TrendSpotter(Input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, emaPeriod, volumeFilterMultiplier, showEntrySignals, showExitSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialLongSignalColor, partialShortSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor, enablePerformanceTracking, enableOptimizationTracking);
+			return indicator.TrendSpotter(Input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, emaPeriod, volumeFilterMultiplier, showEntrySignals, showExitSignals, showPartialSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialLongSignalColor, partialShortSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor, enablePerformanceTracking, enableOptimizationTracking);
 		}
 
-		public Indicators.Myindicators.TrendSpotter TrendSpotter(ISeries<double> input , int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, int emaPeriod, double volumeFilterMultiplier, bool showEntrySignals, bool showExitSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialLongSignalColor, Brush partialShortSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enablePerformanceTracking, bool enableOptimizationTracking)
+		public Indicators.Myindicators.TrendSpotter TrendSpotter(ISeries<double> input , int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, int emaPeriod, double volumeFilterMultiplier, bool showEntrySignals, bool showExitSignals, bool showPartialSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialLongSignalColor, Brush partialShortSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enablePerformanceTracking, bool enableOptimizationTracking)
 		{
-			return indicator.TrendSpotter(input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, emaPeriod, volumeFilterMultiplier, showEntrySignals, showExitSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialLongSignalColor, partialShortSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor, enablePerformanceTracking, enableOptimizationTracking);
+			return indicator.TrendSpotter(input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, emaPeriod, volumeFilterMultiplier, showEntrySignals, showExitSignals, showPartialSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialLongSignalColor, partialShortSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor, enablePerformanceTracking, enableOptimizationTracking);
 		}
 	}
 }
