@@ -1,6 +1,6 @@
 ///Ultra-Optimized TrendSpotter with Split Performance/Optimization Tracking
-///6-28 Performance CSV: Trade-only logging (minimal overhead)
-///6-28 Optimization CSV: Optional detailed analysis (can be disabled)
+///Performance CSV: Trade-only logging (minimal overhead)
+///Optimization CSV: Optional detailed analysis (can be disabled)
 #region Using declarations
 using System;
 using System.Collections.Generic;
@@ -65,6 +65,11 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
 
         // Volume filter variables
         private bool volumeConfirmed;
+
+        // Optimization tracking variables (NEW)
+        private int signalDurationBars;
+        private int recentWinStreak;
+        private string lastMarketRegime;
 
         // Ultra-Lightweight Logging Variables
         private Queue<TradeEvent> performanceBuffer = new Queue<TradeEvent>(5);
@@ -204,6 +209,11 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
             entryHour = 0;
             exitHour = 0;
             conditionsCalculated = false;
+            
+            // Initialize new optimization tracking variables
+            signalDurationBars = 0;
+            recentWinStreak = 0;
+            lastMarketRegime = "Unknown";
         }
 
         private void InitializeCachedValues()
@@ -547,29 +557,59 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
 
                 EnsureOptimizationLogFile();
 
+                // Determine trade event
+                string tradeEvent = "None";
+                if (longEntry || shortEntry) tradeEvent = "Entry";
+                else if (longExit || shortExit) tradeEvent = "Exit";
+
+                // Update signal duration tracking
+                bool hasSignal = (longConditionCount == 6 && volumeConfirmed) || (shortConditionCount == 6 && volumeConfirmed);
+                if (hasSignal)
+                    signalDurationBars++;
+                else
+                    signalDurationBars = 0;
+
+                // Update win streak tracking
+                if (longExit || shortExit)
+                {
+                    double tradePnL = CalculateTradePnL();
+                    if (tradePnL > 0)
+                        recentWinStreak = recentWinStreak >= 0 ? recentWinStreak + 1 : 1;
+                    else if (tradePnL < 0)
+                        recentWinStreak = recentWinStreak <= 0 ? recentWinStreak - 1 : -1;
+                }
+
+                // Determine market regime
+                string marketRegime = DetermineMarketRegime();
+
+                // Count conditions met
+                int conditionsMet = Math.Max(longConditionCount, shortConditionCount);
+
                 var opt = new OptimizationEvent
                 {
-                    DateTime = Time[0],
                     MacdValue = cachedMacdValue,
                     MacdSignal = cachedMacdAvg,
                     MacdRising = CurrentBar > 0 ? cachedMacdValue > GetPreviousMACDValue() : false,
                     AdxValue = cachedADX,
-                    AdxRising = IsADXRising(),
                     DiPlus = cachedDIPlus,
                     DiMinus = cachedDIMinus,
                     DiSpread = currentDISpread,
                     PriceVsEma = (Close[0] - cachedEMAValue) / cachedEMAValue * 100,
                     VolumeRatio = cachedCurrentVolume / cachedVolSMAVal,
-                    VolumeConfirmed = volumeConfirmed,
-                    Condition1 = longEntry ? longCondition1 : shortCondition1,
-                    Condition2 = longEntry ? longCondition2 : shortCondition2,
-                    Condition3 = longEntry ? longCondition3 : shortCondition3,
-                    Condition4 = longEntry ? longCondition4 : shortCondition4,
-                    Condition5 = longEntry ? longCondition5 : shortCondition5,
-                    Condition6 = longEntry ? longCondition6 : shortCondition6,
+                    Condition1 = (longEntry || inLongTrend) ? longCondition1 : shortCondition1,
+                    Condition2 = (longEntry || inLongTrend) ? longCondition2 : shortCondition2,
+                    Condition3 = (longEntry || inLongTrend) ? longCondition3 : shortCondition3,
+                    Condition4 = (longEntry || inLongTrend) ? longCondition4 : shortCondition4,
+                    Condition5 = (longEntry || inLongTrend) ? longCondition5 : shortCondition5,
+                    Condition6 = (longEntry || inLongTrend) ? longCondition6 : shortCondition6,
                     SignalQualityScore = CalculateSignalStrengthScore(),
                     Option2ExitUsed = !useOption3ForTimeframe,
-                    FailedWithin3Bars = (barsInTrend > 0 && barsInTrend <= 3 && (longExit || shortExit))
+                    FailedWithin3Bars = (barsInTrend > 0 && barsInTrend <= 3 && (longExit || shortExit)),
+                    TradeEvent = tradeEvent,
+                    MarketRegime = marketRegime,
+                    AtrValue = cachedATRValue,
+                    SignalDurationBars = signalDurationBars,
+                    ConditionsMetCount = conditionsMet
                 };
 
                 optimizationBuffer.Enqueue(opt);
@@ -663,9 +703,10 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                 using (StreamWriter writer = new StreamWriter(optimizationLogFile, false))
                 {
                     writer.WriteLine(
-                        "DateTime,MACD_Value,MACD_Signal,MACD_Rising,ADX_Value,ADX_Rising,DI_Plus,DI_Minus,DI_Spread," +
-                        "Price_vs_EMA,Volume_Ratio,Volume_Confirmed,Condition1,Condition2,Condition3,Condition4,Condition5,Condition6," +
-                        "Signal_Quality_Score,Option2_Exit_Used,Failed_Within_3_Bars"
+                        "MACD_Value,MACD_Signal,MACD_Rising,ADX_Value,DI_Plus,DI_Minus,DI_Spread," +
+                        "Price_vs_EMA,Volume_Ratio,Condition1,Condition2,Condition3,Condition4,Condition5,Condition6," +
+                        "Signal_Quality_Score,Option2_Exit_Used,Failed_Within_3_Bars," +
+                        "Trade_Event,Market_Regime,ATR_Value,Signal_Duration_Bars,Conditions_Met_Count"
                     );
                 }
                 optimizationHeaderWritten = true;
@@ -744,11 +785,12 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
 
         private string FormatOptimizationEvent(OptimizationEvent opt)
         {
-            return $"{opt.DateTime:yyyy-MM-dd HH:mm:ss},{opt.MacdValue:F4},{opt.MacdSignal:F4},{opt.MacdRising}," +
-                   $"{opt.AdxValue:F2},{opt.AdxRising},{opt.DiPlus:F2},{opt.DiMinus:F2},{opt.DiSpread:F2}," +
-                   $"{opt.PriceVsEma:F2},{opt.VolumeRatio:F2},{opt.VolumeConfirmed}," +
+            return $"{opt.MacdValue:F4},{opt.MacdSignal:F4},{opt.MacdRising}," +
+                   $"{opt.AdxValue:F2},{opt.DiPlus:F2},{opt.DiMinus:F2},{opt.DiSpread:F2}," +
+                   $"{opt.PriceVsEma:F2},{opt.VolumeRatio:F2}," +
                    $"{opt.Condition1},{opt.Condition2},{opt.Condition3},{opt.Condition4},{opt.Condition5},{opt.Condition6}," +
-                   $"{opt.SignalQualityScore},{opt.Option2ExitUsed},{opt.FailedWithin3Bars}";
+                   $"{opt.SignalQualityScore},{opt.Option2ExitUsed},{opt.FailedWithin3Bars}," +
+                   $"{opt.TradeEvent},{opt.MarketRegime},{opt.AtrValue:F2},{opt.SignalDurationBars},{opt.ConditionsMetCount}";
         }
 
         #endregion
@@ -879,6 +921,29 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
             return (Time[0] - tradeEntryTime).TotalMinutes;
         }
 
+        private string DetermineMarketRegime()
+        {
+            try
+            {
+                // Use ADX and ATR to determine market regime
+                double atrNormalized = cachedATRValue / Close[0] * 100; // ATR as percentage of price
+                
+                if (cachedADX > 25 && atrNormalized > 0.5)
+                    return "Trending";
+                else if (cachedADX < 20 && atrNormalized < 0.3)
+                    return "Ranging";
+                else if (atrNormalized > 0.8)
+                    return "Volatile";
+                else
+                    return "Transitional";
+            }
+            catch (Exception ex)
+            {
+                Print($"Market regime detection error: {ex.Message}");
+                return "Unknown";
+            }
+        }
+
         private string DetermineExitReason()
         {
             if (useOption3ForTimeframe)
@@ -958,18 +1023,15 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
 
         private class OptimizationEvent
         {
-            public DateTime DateTime;
             public double MacdValue;
             public double MacdSignal;
             public bool MacdRising;
             public double AdxValue;
-            public bool AdxRising;
             public double DiPlus;
             public double DiMinus;
             public double DiSpread;
             public double PriceVsEma;
             public double VolumeRatio;
-            public bool VolumeConfirmed;
             public bool Condition1;
             public bool Condition2;
             public bool Condition3;
@@ -979,6 +1041,11 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
             public int SignalQualityScore;
             public bool Option2ExitUsed;
             public bool FailedWithin3Bars;
+            public string TradeEvent;
+            public string MarketRegime;
+            public double AtrValue;
+            public int SignalDurationBars;
+            public int ConditionsMetCount;
         }
 
         #endregion
