@@ -1,0 +1,333 @@
+public class TrendSpotter : Indicator
+{
+    #region Variables
+
+    private MACD macd;
+    private DM dm;
+    private EMA ema20;
+    private ATR atr;
+    private SMA volumeSMA;
+
+    private SMA fastSMA;
+    private SMA slowSMA;
+    private SMA signalSMA;
+    private Series<double> macdLine;
+
+    private bool longCondition1, longCondition2, longCondition3, longCondition4, longCondition5, longCondition6;
+    private bool shortCondition1, shortCondition2, shortCondition3, shortCondition4, shortCondition5, shortCondition6;
+    private int longConditionCount, shortConditionCount;
+
+    private bool wasLongSignal, wasShortSignal;
+    private bool inLongTrend, inShortTrend;
+
+    private bool macdMomentumLoss;
+    private bool adxWeakening;
+    private bool diWeakening;
+    private double previousDISpread, currentDISpread;
+    private bool useOption3ForTimeframe;
+
+    private double entryPrice;
+    private double maxFavorableMove;
+    private double maxAdverseMove;
+    private int barsInTrend;
+    private static double cumulativeRevenue = 0;
+
+    private DateTime tradeEntryTime;
+    private int entryHour;
+
+    private bool volumeConfirmed;
+
+    private List<string> logBuffer = new List<string>();
+    private const int LogFlushBars = 50;
+    private string currentLogFile;
+    private bool headerWritten;
+
+    private double cachedVolSMAVal;
+    private double cachedCurrentVolume;
+    private double cachedMacdValue;
+    private double cachedMacdAvg;
+    private double cachedADX;
+    private double cachedDIPlus;
+    private double cachedDIMinus;
+    private double cachedEMAValue;
+    private double cachedATRValue;
+
+    private bool conditionsCalculated;
+
+    // New variables to prevent duplicate CSV entries
+    private DateTime lastLoggedTime = DateTime.MinValue;
+    private bool isLoggingInitialized = false;
+
+    #endregion
+
+    protected override void OnStateChange()
+    {
+        if (State == State.SetDefaults)
+        {
+            Description = @"TrendSpotter Trading Signal Indicator - Fully Optimized with Enhanced Performance & Complete Functionality";
+            Name = "TrendSpotter";
+            Calculate = Calculate.OnBarClose;
+            IsOverlay = true;
+            DisplayInDataBox = true;
+            DrawOnPricePanel = true;
+            PaintPriceMarkers = true;
+            ScaleJustification = NinjaTrader.Gui.Chart.ScaleJustification.Right;
+            IsSuspendedWhileInactive = true;
+
+            MacdFast = 3;
+            MacdSlow = 10;
+            MacdSmooth = 16;
+            MacdMAType = CustomEnumNamespace.UniversalMovingAverage.SMA;
+
+            DmPeriod = 14;
+            AdxRisingBars = 1;
+
+            EmaPeriod = 20;
+
+            ShowEntrySignals = true;
+            ShowExitSignals = true;
+            Signal_Offset = 5;
+            LongOn = "LongEntry";
+            ShortOn = "ShortEntry";
+            LongOff = "LongExit";
+            ShortOff = "ShortExit";
+
+            PartialLongSignalColor = Brushes.Green;
+            PartialShortSignalColor = Brushes.Red;
+            PartialSignalOpacity = 15;
+
+            LongEntryColor = Brushes.Lime;
+            ShortEntryColor = Brushes.Red;
+
+            ExitColor = Brushes.DimGray;
+
+            EnableDataTracking = true;
+
+            VolumeFilterMultiplier = 1.5;
+        }
+        else if (State == State.DataLoaded)
+        {
+            dm = DM(DmPeriod);
+            ema20 = EMA(EmaPeriod);
+            atr = ATR(14);
+            volumeSMA = SMA(Volume, 20);
+
+            if (MacdMAType != CustomEnumNamespace.UniversalMovingAverage.EMA)
+            {
+                fastSMA = SMA(MacdFast);
+                slowSMA = SMA(MacdSlow);
+                macdLine = new Series<double>(this);
+                signalSMA = SMA(macdLine, MacdSmooth);
+            }
+            else
+            {
+                macd = MACD(MacdFast, MacdSlow, MacdSmooth);
+            }
+
+            InitializeTrackingVariables();
+        }
+        else if (State == State.Terminated)
+        {
+            try { FlushLogBuffer(); }
+            catch (Exception ex) { Print($"Error flushing log buffer on termination: {ex.Message}"); }
+        }
+    }
+
+    private void InitializeTrackingVariables()
+    {
+        currentLogFile = string.Empty;
+        headerWritten = false;
+        entryPrice = 0;
+        maxFavorableMove = 0;
+        maxAdverseMove = 0;
+        barsInTrend = 0;
+        useOption3ForTimeframe = BarsPeriod.Value >= 5;
+        tradeEntryTime = DateTime.MinValue;
+        entryHour = 0;
+        conditionsCalculated = false;
+
+        InitializeLogging();
+    }
+
+    private void InitializeLogging()
+    {
+        if (isLoggingInitialized)
+            return;
+
+        currentLogFile = GetOptimizedLogFilePath(Time[0]);
+
+        if (File.Exists(currentLogFile))
+        {
+            lastLoggedTime = GetLastLoggedTimestamp(currentLogFile);
+            headerWritten = true;
+        }
+        else
+        {
+            lastLoggedTime = DateTime.MinValue;
+            headerWritten = false;
+        }
+
+        isLoggingInitialized = true;
+    }
+
+    private DateTime GetLastLoggedTimestamp(string filePath)
+    {
+        try
+        {
+            string lastLine = File.ReadLines(filePath).LastOrDefault();
+            if (string.IsNullOrEmpty(lastLine))
+                return DateTime.MinValue;
+
+            var fields = lastLine.Split(',');
+            if (fields.Length == 0)
+                return DateTime.MinValue;
+
+            DateTime dt;
+            if (DateTime.TryParse(fields[0], out dt))
+                return dt;
+        }
+        catch
+        {
+            // ignored
+        }
+        return DateTime.MinValue;
+    }
+
+    protected override void OnBarUpdate()
+    {
+        if (!isLoggingInitialized)
+            InitializeLogging();
+
+        if (CurrentBar < Math.Max(Math.Max(MacdSlow, DmPeriod), EmaPeriod))
+            return;
+
+        CacheIndicatorValues();
+        CalculateEntryConditions();
+
+        volumeConfirmed = cachedCurrentVolume > cachedVolSMAVal * VolumeFilterMultiplier;
+
+        bool currentLongSignal = (longConditionCount == 6) && volumeConfirmed;
+        bool currentShortSignal = (shortConditionCount == 6) && volumeConfirmed;
+
+        bool longExit, shortExit;
+        CalculateExitSignals(out longExit, out shortExit);
+
+        UpdatePerformanceTracking();
+
+        UpdateTrendStatus(currentLongSignal, currentShortSignal, longExit, shortExit);
+
+        DrawSignalsOptimized(currentLongSignal, currentShortSignal, longExit, shortExit);
+
+        if (EnableDataTracking)
+        {
+            BufferOptimizedDataForAnalysis(currentLongSignal, currentShortSignal, longExit, shortExit);
+        }
+
+        UpdateSignalFlags(currentLongSignal, currentShortSignal, longExit, shortExit);
+    }
+
+    private void BufferOptimizedDataForAnalysis(bool currentLongSignal, bool currentShortSignal,
+        bool longExit, bool shortExit)
+    {
+        try
+        {
+            DateTime barTime = Time[0];
+
+            // Skip logging if this bar was already logged (duplicate prevention)
+            if (barTime <= lastLoggedTime)
+                return;
+
+            if (!IsWithinTradingHours(barTime))
+                return;
+
+            if (string.IsNullOrEmpty(currentLogFile))
+                currentLogFile = GetOptimizedLogFilePath(barTime);
+
+            if (!headerWritten)
+            {
+                WriteOptimizedHeader();
+                headerWritten = true;
+            }
+
+            string logEntry = CreateOptimizedLogEntry(barTime, currentLongSignal, currentShortSignal, longExit, shortExit);
+
+            logBuffer.Add(logEntry);
+
+            if (logBuffer.Count >= LogFlushBars)
+                FlushLogBuffer();
+
+            lastLoggedTime = barTime;
+        }
+        catch (Exception ex)
+        {
+            Print($"Optimized data logging error: {ex.Message}");
+        }
+    }
+
+    // These methods remain unchanged from your original code and should be implemented accordingly:
+    private void CacheIndicatorValues()
+    {
+        // Your existing implementation goes here
+    }
+
+    private void CalculateEntryConditions()
+    {
+        // Your existing implementation goes here
+    }
+
+    private void CalculateExitSignals(out bool longExit, out bool shortExit)
+    {
+        // Your existing implementation goes here
+        longExit = false;
+        shortExit = false;
+    }
+
+    private void UpdatePerformanceTracking()
+    {
+        // Your existing implementation goes here
+    }
+
+    private void UpdateTrendStatus(bool currentLongSignal, bool currentShortSignal, bool longExit, bool shortExit)
+    {
+        // Your existing implementation goes here
+    }
+
+    private void DrawSignalsOptimized(bool currentLongSignal, bool currentShortSignal, bool longExit, bool shortExit)
+    {
+        // Your existing implementation goes here
+    }
+
+    private void UpdateSignalFlags(bool currentLongSignal, bool currentShortSignal, bool longExit, bool shortExit)
+    {
+        // Your existing implementation goes here
+    }
+
+    private bool IsWithinTradingHours(DateTime barTime)
+    {
+        // Your existing implementation or logic
+        return true;
+    }
+
+    private string GetOptimizedLogFilePath(DateTime barTime)
+    {
+        // Your existing implementation goes here
+        return @"C:\Path\To\Your\LogFile.csv";
+    }
+
+    private void WriteOptimizedHeader()
+    {
+        // Your existing implementation goes here
+    }
+
+    private string CreateOptimizedLogEntry(DateTime barTime, bool currentLongSignal, bool currentShortSignal,
+        bool longExit, bool shortExit)
+    {
+        // Your existing implementation goes here - create CSV formatted string
+        return string.Empty;
+    }
+
+    private void FlushLogBuffer()
+    {
+        // Your existing implementation goes here - flush buffered logs to file
+    }
+}
