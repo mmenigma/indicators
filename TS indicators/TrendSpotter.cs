@@ -1,0 +1,1485 @@
+///6-19 Ultra-Optimized TrendSpotter with Split Performance/Optimization Tracking
+///6-28 Performance CSV: Trade-only logging (minimal overhead)
+///6-28 Optimization CSV: Optional detailed analysis (can be disabled)
+///6-28 added partial signal toggle
+///7-03 DUPLICATE PREVENTION FIX: Eliminates all duplicate entries
+///7-03 SMART HISTORICAL COLLECTION: Collects historical data on first load only
+#region Using declarations
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
+using System.IO;
+using System.Linq;
+using System.Windows;
+using System.Windows.Media;
+using System.Xml.Serialization;
+using NinjaTrader.Cbi;
+using NinjaTrader.Data;
+using NinjaTrader.Gui;
+using NinjaTrader.Gui.Chart;
+using NinjaTrader.Gui.Tools;
+using NinjaTrader.NinjaScript;
+using NinjaTrader.NinjaScript.DrawingTools;
+#endregion
+
+namespace NinjaTrader.NinjaScript.Indicators.Myindicators
+{
+    public class TrendSpotter : Indicator
+    {
+        #region Variables
+        private MACD macd;
+        private DM dm;
+        private EMA ema20;
+        private ATR atr;
+        private SMA volumeSMA;
+
+        // For custom SMA-based MACD calculation
+        private SMA fastSMA;
+        private SMA slowSMA;
+        private SMA signalSMA;
+        private Series<double> macdLine;
+
+        // Entry/exit condition flags
+        private bool longCondition1, longCondition2, longCondition3, longCondition4, longCondition5, longCondition6;
+        private bool shortCondition1, shortCondition2, shortCondition3, shortCondition4, shortCondition5, shortCondition6;
+        private int longConditionCount, shortConditionCount;
+
+        private bool wasLongSignal, wasShortSignal;
+        private bool inLongTrend, inShortTrend;
+
+        // Exit strategy variables
+        private bool macdMomentumLoss;
+        private bool adxWeakening;
+        private bool diWeakening;
+        private double previousDISpread, currentDISpread;
+        private bool useOption3ForTimeframe;
+
+        // Tracking variables for analysis
+        private double entryPrice;
+        private double maxFavorableMove;
+        private double maxAdverseMove;
+        private int barsInTrend;
+        private static double cumulativeRevenue = 0;
+
+        // Time tracking variables
+        private DateTime tradeEntryTime;
+        private int entryHour;
+        private int exitHour;
+
+        // Volume filter variables
+        private bool volumeConfirmed;
+
+        // Optimization tracking variables (NEW)
+        private int signalDurationBars;
+        private int recentWinStreak;
+        private string lastMarketRegime;
+		private TradeEvent currentTradeEntry;
+
+        // Ultra-Lightweight Logging Variables
+        private Queue<TradeEvent> performanceBuffer = new Queue<TradeEvent>(5);
+        private Queue<OptimizationEvent> optimizationBuffer = new Queue<OptimizationEvent>(20);
+        private string performanceLogFile;
+        private string optimizationLogFile;
+        private bool performanceHeaderWritten;
+        private bool optimizationHeaderWritten;
+        
+        // Cached instrument name (compute once)
+        private string cachedInstrumentName;
+        private string cachedChartType;
+
+        // Performance optimization - cached values
+        private double cachedVolSMAVal;
+        private double cachedCurrentVolume;
+        private double cachedMacdValue;
+        private double cachedMacdAvg;
+        private double cachedADX;
+        private double cachedDIPlus;
+        private double cachedDIMinus;
+        private double cachedEMAValue;
+        private double cachedATRValue;
+
+        // Condition validation cache
+        private bool conditionsCalculated;
+
+        // SMART DUPLICATE PREVENTION VARIABLES - ENHANCED
+        private HashSet<string> loggedTrades = new HashSet<string>();
+        private bool isHistoricalProcessing = false;
+        private int currentBarIndex = -1;
+        private DateTime lastProcessedBarTime = DateTime.MinValue;
+        private bool hasProcessedHistoricalData = false;
+        private bool allowHistoricalLogging = false;
+        private string currentDateFile = "";
+
+        #endregion
+
+        protected override void OnStateChange()
+        {
+            if (State == State.SetDefaults)
+            {
+                Description = @"TrendSpotter Trading Signal Indicator - Ultra-Optimized with Smart Historical Processing";
+                Name = "TrendSpotter";
+                Calculate = Calculate.OnBarClose;
+                IsOverlay = true;
+                DisplayInDataBox = true;
+                DrawOnPricePanel = true;
+                PaintPriceMarkers = true;
+                ScaleJustification = NinjaTrader.Gui.Chart.ScaleJustification.Right;
+                IsSuspendedWhileInactive = true;
+
+                // MACD Settings
+                MacdFast = 3;
+                MacdSlow = 10;
+                MacdSmooth = 16;
+                MacdMAType = CustomEnumNamespace.UniversalMovingAverage.SMA;
+
+                // DM Settings  
+                DmPeriod = 14;
+                AdxRisingBars = 1;
+				MinAdxThreshold = 18;
+
+                // EMA Settings
+                EmaPeriod = 20;
+
+                // Signal Settings
+                ShowEntrySignals = true;
+                ShowExitSignals = true;
+                ShowPartialSignals = true;  // Default ON, can be disabled for performance
+                Signal_Offset = 5;
+                LongOn = "LongEntry";
+                ShortOn = "ShortEntry";
+                LongOff = "LongExit";
+                ShortOff = "ShortExit";
+
+                // Background Colors
+                PartialLongSignalColor = Brushes.Green;
+                PartialShortSignalColor = Brushes.Red;
+                PartialSignalOpacity = 15;
+
+                // Entry Arrow Colors
+                LongEntryColor = Brushes.Lime;
+                ShortEntryColor = Brushes.Red;
+
+                // Exit Signal Color
+                ExitColor = Brushes.DimGray;
+
+                // Split Data Tracking (Both Optional)
+                EnablePerformanceTracking = true;
+                EnableOptimizationTracking = false;  // Default OFF for live trading
+				WriteCSVHeaders = false;  // Default OFF to prevent header issues
+
+                // Volume Filter Settings
+                VolumeFilterMultiplier = 1.5;
+
+                // Smart Historical Collection (NEW)
+                EnableHistoricalDataCollection = true;
+
+                // Debug Settings
+                DuplicateDetectionMode = false;
+				
+				// NEW: Configurable Trading Hours (ADD THESE 2 LINES)
+			    TradingStartTime = new TimeSpan(9, 30, 0);  // 9:30 AM
+			    TradingEndTime = new TimeSpan(16, 0, 0);    // 4:00 PM
+}
+
+            else if (State == State.DataLoaded)
+            {
+                // Initialize built-in indicators
+                dm = DM(DmPeriod);
+                ema20 = EMA(EmaPeriod);
+                atr = ATR(14);
+                volumeSMA = SMA(Volume, 20);
+
+                // Pre-instantiate SMA indicators if custom MACD (SMA based)
+                if (MacdMAType != CustomEnumNamespace.UniversalMovingAverage.EMA)
+                {
+                    fastSMA = SMA(MacdFast);
+                    slowSMA = SMA(MacdSlow);
+                    macdLine = new Series<double>(this);
+                    signalSMA = SMA(macdLine, MacdSmooth);
+                }
+                else
+                {
+                    macd = MACD(MacdFast, MacdSlow, MacdSmooth);
+                }
+
+                // Initialize tracking variables
+                InitializeTrackingVariables();
+                
+                // Cache expensive computations
+                InitializeCachedValues();
+
+                // ENHANCED: Smart historical data detection
+                loggedTrades.Clear();
+                isHistoricalProcessing = true;
+                currentBarIndex = -1;
+                lastProcessedBarTime = DateTime.MinValue;
+                hasProcessedHistoricalData = false;
+                
+                // SIMPLIFIED: Just enable historical if setting is on
+			    allowHistoricalLogging = EnableHistoricalDataCollection;
+                
+                // Clear any existing trade state
+                currentTradeEntry = null;
+                wasLongSignal = false;
+                wasShortSignal = false;
+                inLongTrend = false;
+                inShortTrend = false;
+                
+                Print("TrendSpotter initialized - Smart historical processing enabled");
+            }
+			else if (State == State.Historical)
+			{
+			    isHistoricalProcessing = true;
+			    Print("TrendSpotter in Historical mode - Processing all historical data");
+			}
+            else if (State == State.Realtime)
+            {
+                isHistoricalProcessing = false;
+                hasProcessedHistoricalData = true;
+                Print("TrendSpotter switched to Realtime mode - Logging enabled");
+            }
+            else if (State == State.Terminated)
+            {
+                try
+                {
+                    if (currentTradeEntry != null)
+                    {
+                        Print($"Warning: Indicator terminated with pending trade entry. This trade will not be logged to prevent incomplete data.");
+                        currentTradeEntry = null;
+                    }
+                    
+                    FlushAllBuffers();
+                    loggedTrades.Clear();
+                }
+                catch (Exception ex)
+                {
+                    Print($"Error during termination cleanup: {ex.Message}");
+                }
+            }
+        }
+
+        private void InitializeTrackingVariables()
+        {
+            performanceLogFile = string.Empty;
+            optimizationLogFile = string.Empty;
+            performanceHeaderWritten = false;
+            optimizationHeaderWritten = false;
+            entryPrice = 0;
+            maxFavorableMove = 0;
+            maxAdverseMove = 0;
+            barsInTrend = 0;
+            useOption3ForTimeframe = BarsPeriod.Value >= 5;
+            tradeEntryTime = DateTime.MinValue;
+            entryHour = 0;
+            exitHour = 0;
+            conditionsCalculated = false;
+            
+            // Initialize new optimization tracking variables
+            signalDurationBars = 0;
+            recentWinStreak = 0;
+            lastMarketRegime = "Unknown";
+			currentTradeEntry = null;
+        }
+
+        private void InitializeCachedValues()
+        {
+            cachedInstrumentName = Instrument.MasterInstrument.Name.Replace(" ", "_").Replace("/", "_");
+            cachedChartType = DetermineChartTypeFolder();
+        }
+
+		protected override void OnBarUpdate()
+		{
+		    if (CurrentBar < Math.Max(Math.Max(MacdSlow, DmPeriod), EmaPeriod))
+		        return;
+		
+		    // CRITICAL FIX: Skip duplicate bar processing
+		    if (CurrentBar == currentBarIndex && Time[0] == lastProcessedBarTime)
+		    {
+		        return; // Skip - already processed this bar
+		    }
+		    
+		    // Update tracking
+		    currentBarIndex = CurrentBar;
+		    lastProcessedBarTime = Time[0];
+		
+		    // Cache all indicator values once per bar for performance
+		    CacheIndicatorValues();
+		
+		    // Calculate all entry conditions once
+		    CalculateEntryConditions();
+		
+		    // Volume filter confirmation (using cached values)
+		    volumeConfirmed = cachedCurrentVolume > cachedVolSMAVal * VolumeFilterMultiplier;
+		
+		    // Current signals including volume filter
+		    bool currentLongSignal = (longConditionCount == 6) && volumeConfirmed;
+		    bool currentShortSignal = (shortConditionCount == 6) && volumeConfirmed;
+		
+		    // Calculate exit conditions and determine exit signals
+		    bool longExit, shortExit;
+		    CalculateExitSignals(out longExit, out shortExit);
+		
+		    // Update performance tracking during trends
+		    UpdatePerformanceTracking();
+		
+		    // ORIGINAL: Simple logging - just check if enabled
+		    LogTradeEvents(currentLongSignal, currentShortSignal, longExit, shortExit);
+		
+		    // Update trend status with optimized entry tracking
+		    UpdateTrendStatus(currentLongSignal, currentShortSignal, longExit, shortExit);
+		
+		    // Draw signals with optimized drawing logic
+		    DrawSignalsOptimized(currentLongSignal, currentShortSignal, longExit, shortExit);
+		
+		    // Update signal tracking flags efficiently
+		    UpdateSignalFlags(currentLongSignal, currentShortSignal, longExit, shortExit);
+		
+		    // Debug mode detection
+		    if (DuplicateDetectionMode) 
+		        DetectDuplicateAttempts(currentLongSignal, currentShortSignal, longExit, shortExit);
+		}
+        private void CacheIndicatorValues()
+        {
+            // Cache volume values to reduce repeated access
+            cachedVolSMAVal = volumeSMA[0];
+            cachedCurrentVolume = Volume[0];
+
+            // Cache MACD values
+            if (MacdMAType == CustomEnumNamespace.UniversalMovingAverage.EMA)
+            {
+                cachedMacdValue = macd.Default[0];
+                cachedMacdAvg = macd.Avg[0];
+            }
+            else
+            {
+                fastSMA.Update();
+                slowSMA.Update();
+                macdLine[0] = fastSMA[0] - slowSMA[0];
+
+                if (CurrentBar >= MacdSmooth - 1)
+                {
+                    signalSMA.Update();
+                    cachedMacdAvg = signalSMA[0];
+                }
+                else
+                {
+                    cachedMacdAvg = macdLine[0];
+                }
+                cachedMacdValue = macdLine[0];
+            }
+
+            // Cache DM and other indicator values
+            cachedADX = dm.ADXPlot[0];
+            cachedDIPlus = dm.DiPlus[0];
+            cachedDIMinus = dm.DiMinus[0];
+            cachedEMAValue = ema20[0];
+            cachedATRValue = atr[0];
+
+            // Calculate DI Spread for exit conditions
+            currentDISpread = Math.Abs(cachedDIPlus - cachedDIMinus);
+            if (CurrentBar > 0)
+                previousDISpread = Math.Abs(dm.DiPlus[1] - dm.DiMinus[1]);
+        }
+
+        private void CalculateEntryConditions()
+        {
+            // Modified ADX logic with consecutive rising and threshold
+			bool adxRising = true;
+			bool adxAboveThreshold = cachedADX >= MinAdxThreshold;
+			
+			if (CurrentBar >= AdxRisingBars)
+			{
+			    // Check for consecutive rising bars
+			    for (int i = 0; i < AdxRisingBars; i++)
+			    {
+			        if (dm.ADXPlot[i] <= dm.ADXPlot[i + 1])
+			        {
+			            adxRising = false;
+			            break;
+			        }
+			    }
+			}
+			
+			// Update conditions to include both checks
+			bool adxConditionMet = adxRising && adxAboveThreshold;
+
+            // 6-Condition Entry System using cached values
+            longCondition1 = cachedMacdValue > 0;
+            longCondition2 = cachedMacdValue > cachedMacdAvg;
+            longCondition3 = CurrentBar > 0 ? cachedMacdValue > GetPreviousMACDValue() : true;
+            longCondition4 = adxConditionMet;
+            longCondition5 = cachedDIPlus > cachedDIMinus;
+            longCondition6 = Close[0] > cachedEMAValue;
+
+            shortCondition1 = cachedMacdValue < 0;
+            shortCondition2 = cachedMacdValue < cachedMacdAvg;
+            shortCondition3 = CurrentBar > 0 ? cachedMacdValue < GetPreviousMACDValue() : true;
+            shortCondition4 = adxConditionMet;
+            shortCondition5 = cachedDIMinus > cachedDIPlus;
+            shortCondition6 = Close[0] < cachedEMAValue;
+
+            // Optimized condition counting
+            longConditionCount = CountConditions(longCondition1, longCondition2, longCondition3, 
+                                               longCondition4, longCondition5, longCondition6);
+            shortConditionCount = CountConditions(shortCondition1, shortCondition2, shortCondition3, 
+                                                shortCondition4, shortCondition5, shortCondition6);
+
+            conditionsCalculated = true;
+        }
+
+        private double GetPreviousMACDValue()
+        {
+            return MacdMAType == CustomEnumNamespace.UniversalMovingAverage.EMA 
+                ? macd.Default[1] 
+                : macdLine[1];
+        }
+
+        private int CountConditions(bool c1, bool c2, bool c3, bool c4, bool c5, bool c6)
+        {
+            return (c1 ? 1 : 0) + (c2 ? 1 : 0) + (c3 ? 1 : 0) + (c4 ? 1 : 0) + (c5 ? 1 : 0) + (c6 ? 1 : 0);
+        }
+
+        private void CalculateExitSignals(out bool longExit, out bool shortExit)
+        {
+            if (useOption3ForTimeframe)
+            {
+                // Option 3: Exit when any of the 6 conditions becomes false
+                bool anyLongFalse = !longCondition1 || !longCondition2 || !longCondition3 || 
+                                   !longCondition4 || !longCondition5 || !longCondition6;
+                bool anyShortFalse = !shortCondition1 || !shortCondition2 || !shortCondition3 || 
+                                    !shortCondition4 || !shortCondition5 || !shortCondition6;
+
+                longExit = inLongTrend && anyLongFalse;
+                shortExit = inShortTrend && anyShortFalse;
+            }
+            else
+            {
+                // Option 2: Multi-Condition Exit Strategy
+                CalculateExitConditions();
+                longExit = inLongTrend && (macdMomentumLoss && (adxWeakening || diWeakening));
+                shortExit = inShortTrend && (macdMomentumLoss && (adxWeakening || diWeakening));
+            }
+        }
+
+        private void CalculateExitConditions()
+        {
+            // MACD Momentum Check: Current MACD ≤ Previous MACD for 2 consecutive bars
+            macdMomentumLoss = false;
+            if (CurrentBar >= 2)
+            {
+                double prevMacd1 = MacdMAType == CustomEnumNamespace.UniversalMovingAverage.EMA 
+                    ? macd.Default[1] : macdLine[1];
+                double prevMacd2 = MacdMAType == CustomEnumNamespace.UniversalMovingAverage.EMA 
+                    ? macd.Default[2] : macdLine[2];
+
+                macdMomentumLoss = (cachedMacdValue <= prevMacd1) && (prevMacd1 <= prevMacd2);
+            }
+
+            // ADX and DI weakening checks
+            adxWeakening = CurrentBar >= 1 && cachedADX < dm.ADXPlot[1];
+            diWeakening = CurrentBar >= 1 && currentDISpread < previousDISpread;
+        }
+
+        private void UpdatePerformanceTracking()
+        {
+            if (inLongTrend || inShortTrend)
+            {
+                barsInTrend++;
+
+                double currentMove = inLongTrend ? Close[0] - entryPrice : entryPrice - Close[0];
+
+                if (currentMove > maxFavorableMove)
+                    maxFavorableMove = currentMove;
+                if (currentMove < maxAdverseMove)
+                    maxAdverseMove = currentMove;
+            }
+        }
+
+        private void UpdateTrendStatus(bool currentLongSignal, bool currentShortSignal, bool longExit, bool shortExit)
+        {
+            // FIXED: More strict entry conditions to prevent duplicates
+            if (currentLongSignal && !inLongTrend && !inShortTrend && currentTradeEntry == null)
+            {
+                SetLongTrendEntry();
+            }
+            else if (currentShortSignal && !inShortTrend && !inLongTrend && currentTradeEntry == null)
+            {
+                SetShortTrendEntry();
+            }
+            else if (longExit && inLongTrend)
+            {
+                exitHour = Time[0].Hour;
+                inLongTrend = false;
+                barsInTrend = 0;
+                // Note: currentTradeEntry will be cleared in LogPerformanceExit()
+            }
+            else if (shortExit && inShortTrend)
+            {
+                exitHour = Time[0].Hour;
+                inShortTrend = false;
+                barsInTrend = 0;
+                // Note: currentTradeEntry will be cleared in LogPerformanceExit()
+            }
+        }
+
+        private void SetLongTrendEntry()
+        {
+            inLongTrend = true;
+            inShortTrend = false;
+            SetEntryTracking(Close[0], Time[0]);
+        }
+
+        private void SetShortTrendEntry()
+        {
+            inShortTrend = true;
+            inLongTrend = false;
+            SetEntryTracking(Close[0], Time[0]);
+        }
+
+        private void SetEntryTracking(double price, DateTime time)
+        {
+            entryPrice = price;
+            maxFavorableMove = 0;
+            maxAdverseMove = 0;
+            barsInTrend = 1;
+            tradeEntryTime = time;
+            entryHour = time.Hour;
+        }
+
+        #region ULTRA-LIGHTWEIGHT LOGGING SYSTEM WITH SMART HISTORICAL SUPPORT
+
+        // PERFORMANCE LOGGING: Trade events only with smart historical collection
+        private void LogTradeEvents(bool currentLongSignal, bool currentShortSignal, bool longExit, bool shortExit)
+        {
+            // Performance tracking: Only log actual trade events with additional safety checks
+            if (EnablePerformanceTracking)
+            {
+                // ENTRY LOGGING - Enhanced duplicate prevention
+                if (currentLongSignal && !wasLongSignal && !inLongTrend && currentTradeEntry == null)
+                {
+                    LogPerformanceEntry("Long");
+                }
+                else if (currentShortSignal && !wasShortSignal && !inShortTrend && currentTradeEntry == null)
+                {
+                    LogPerformanceEntry("Short");
+                }
+                // EXIT LOGGING - Enhanced with safety checks
+                else if ((longExit || shortExit) && currentTradeEntry != null && (inLongTrend || inShortTrend))
+                {
+                    LogPerformanceExit();
+                }
+            }
+
+            // Optimization tracking: Can log more frequently if enabled
+            if (EnableOptimizationTracking && (currentLongSignal || currentShortSignal || longExit || shortExit))
+            {
+                LogOptimizationData(currentLongSignal, currentShortSignal, longExit, shortExit);
+            }
+        }
+
+				private void LogPerformanceEntry(string tradeType)
+				{
+				    try
+				    {
+				        if (!IsWithinTradingHours(Time[0])) return;
+				        
+				        // Simple duplicate check
+				        string tradeKey = $"{Time[0]:yyyy-MM-dd HH:mm:ss}|{tradeType}|{Close[0]:F2}";
+				        
+				        if (loggedTrades.Contains(tradeKey))
+				        {
+				            return;
+				        }
+				        
+				        if (currentTradeEntry != null)
+				        {
+				            return;
+				        }
+				
+				        EnsurePerformanceLogFile();
+				
+				        currentTradeEntry = new TradeEvent
+				        {
+				            Instrument = cachedInstrumentName,
+				            ChartType = cachedChartType,
+				            ChartPeriod = BarsPeriod.Value,
+				            EntryDateTime = Time[0],
+				            EntryPrice = Close[0],
+				            TradeType = tradeType,
+				            EntryHour = Time[0].Hour,
+				            SignalStrengthScore = CalculateSignalStrengthScore(),
+				            IsEntry = true
+				        };
+				
+				        loggedTrades.Add(tradeKey);
+				        
+				        Print($"ENTRY LOGGED: {tradeType} at {Time[0]:yyyy-MM-dd HH:mm:ss} Price: {Close[0]:F2}");
+				    }
+				    catch (Exception ex)
+				    {
+				        Print($"Performance entry logging error: {ex.Message}");
+				    }
+				}
+
+				private void LogPerformanceExit()
+				{
+				    try
+				    {
+				       if (!IsWithinTradingHours(Time[0]) || currentTradeEntry == null) return;
+                
+                // CRITICAL FIX: Create unique exit identifier with state info
+                string exitKey = $"{currentTradeEntry.EntryDateTime:yyyy-MM-dd HH:mm:ss}|{Time[0]:yyyy-MM-dd HH:mm:ss}|EXIT|{State}";
+                
+                if (loggedTrades.Contains(exitKey))
+                {
+                    Print($"DUPLICATE EXIT PREVENTED: {currentTradeEntry.TradeType} entry at {currentTradeEntry.EntryDateTime:yyyy-MM-dd HH:mm:ss} ({State})");
+                    return;
+                }
+
+                EnsurePerformanceLogFile();
+
+                double tradePnL = CalculateTradePnL();
+                cumulativeRevenue += tradePnL;
+
+                // Create complete trade row combining entry and exit data
+                var completeTrade = new TradeEvent
+                {
+                    // Entry data from stored entry
+                    Instrument = currentTradeEntry.Instrument,
+                    ChartType = currentTradeEntry.ChartType,
+                    ChartPeriod = currentTradeEntry.ChartPeriod,
+                    EntryDateTime = currentTradeEntry.EntryDateTime,
+                    EntryPrice = currentTradeEntry.EntryPrice,
+                    TradeType = currentTradeEntry.TradeType,
+                    EntryHour = currentTradeEntry.EntryHour,
+                    SignalStrengthScore = currentTradeEntry.SignalStrengthScore,
+                    
+                    // Exit data from current bar
+                    ExitDateTime = Time[0],
+                    ExitPrice = Close[0],
+                    TradePnL = tradePnL,
+                    MaxFavorableExcursion = maxFavorableMove,
+                    MaxAdverseExcursion = maxAdverseMove,
+                    TradeDurationMinutes = CalculateTradeDuration(),
+                    ExitHour = Time[0].Hour,
+                    ExitReason = DetermineExitReason(),
+                    IsEntry = false // Flag as complete trade
+                };
+
+                performanceBuffer.Enqueue(completeTrade);
+                FlushPerformanceBuffer();
+
+                // Add to logged trades set
+                loggedTrades.Add(exitKey);
+
+                string mode = (State == State.Realtime) ? "REALTIME" : "HISTORICAL";
+                Print($"EXIT LOGGED ({mode}): {currentTradeEntry.TradeType} at {Time[0]:yyyy-MM-dd HH:mm:ss} Price: {Close[0]:F2} P&L: {tradePnL:F2}");
+
+                // Clear stored entry data
+                currentTradeEntry = null;
+            }
+            catch (Exception ex)
+            {
+                Print($"Performance exit logging error: {ex.Message}");
+            }
+        }
+
+        private void LogOptimizationData(bool longEntry, bool shortEntry, bool longExit, bool shortExit)
+        {
+            try
+            {
+                if (!IsWithinTradingHours(Time[0])) return;
+
+                EnsureOptimizationLogFile();
+
+                // Determine trade event
+                string tradeEvent = "None";
+                if (longEntry || shortEntry) tradeEvent = "Entry";
+                else if (longExit || shortExit) tradeEvent = "Exit";
+
+                // Update signal duration tracking
+                bool hasSignal = (longConditionCount == 6 && volumeConfirmed) || (shortConditionCount == 6 && volumeConfirmed);
+                if (hasSignal)
+                    signalDurationBars++;
+                else
+                    signalDurationBars = 0;
+
+                // Update win streak tracking
+                if (longExit || shortExit)
+                {
+                    double tradePnL = CalculateTradePnL();
+                    if (tradePnL > 0)
+                        recentWinStreak = recentWinStreak >= 0 ? recentWinStreak + 1 : 1;
+                    else if (tradePnL < 0)
+                        recentWinStreak = recentWinStreak <= 0 ? recentWinStreak - 1 : -1;
+                }
+
+                // Determine market regime
+                string marketRegime = DetermineMarketRegime();
+
+                // Count conditions met
+                int conditionsMet = Math.Max(longConditionCount, shortConditionCount);
+
+                var opt = new OptimizationEvent
+                {
+                    MacdValue = cachedMacdValue,
+                    MacdSignal = cachedMacdAvg,
+                    MacdRising = CurrentBar > 0 ? cachedMacdValue > GetPreviousMACDValue() : false,
+                    AdxValue = cachedADX,
+                    DiPlus = cachedDIPlus,
+                    DiMinus = cachedDIMinus,
+                    DiSpread = currentDISpread,
+                    PriceVsEma = (Close[0] - cachedEMAValue) / cachedEMAValue * 100,
+                    VolumeRatio = cachedCurrentVolume / cachedVolSMAVal,
+                    Condition1 = (longEntry || inLongTrend) ? longCondition1 : shortCondition1,
+                    Condition2 = (longEntry || inLongTrend) ? longCondition2 : shortCondition2,
+                    Condition3 = (longEntry || inLongTrend) ? longCondition3 : shortCondition3,
+                    Condition4 = (longEntry || inLongTrend) ? longCondition4 : shortCondition4,
+                    Condition5 = (longEntry || inLongTrend) ? longCondition5 : shortCondition5,
+                    Condition6 = (longEntry || inLongTrend) ? longCondition6 : shortCondition6,
+                    SignalQualityScore = CalculateSignalStrengthScore(),
+                    Option2ExitUsed = !useOption3ForTimeframe,
+                    FailedWithin3Bars = (barsInTrend > 0 && barsInTrend <= 3 && (longExit || shortExit)),
+                    TradeEvent = tradeEvent,
+                    MarketRegime = marketRegime,
+                    AtrValue = cachedATRValue,
+                    SignalDurationBars = signalDurationBars,
+                    ConditionsMetCount = conditionsMet
+                };
+
+                optimizationBuffer.Enqueue(opt);
+                if (optimizationBuffer.Count >= 10) // Smaller buffer for optimization data
+                    FlushOptimizationBuffer();
+            }
+            catch (Exception ex)
+            {
+                Print($"Optimization logging error: {ex.Message}");
+            }
+        }
+
+		private void EnsurePerformanceLogFile()
+		{
+		    DateTime barDate = Time[0].Date;  // Use the actual bar's date, not today
+		    string newPath = GetPerformanceLogPath(barDate);
+		    
+		    if (performanceLogFile != newPath)
+		    {
+		        FlushPerformanceBuffer();
+		        performanceLogFile = newPath;
+		        performanceHeaderWritten = false;
+		        WritePerformanceHeader();
+		    }
+		}
+
+        private void EnsureOptimizationLogFile()
+        {
+            DateTime today = Time[0].Date;
+            string newPath = GetOptimizationLogPath(today);
+            
+            if (optimizationLogFile != newPath)
+            {
+                FlushOptimizationBuffer();
+                optimizationLogFile = newPath;
+                optimizationHeaderWritten = false;
+                WriteOptimizationHeader();
+            }
+        }
+
+        private string GetPerformanceLogPath(DateTime date)
+        {
+            string basePath = @"G:\My Drive\Trading\Data\TrendSpotterData";
+            string folderPath = Path.Combine(basePath, $"TS {cachedInstrumentName} {cachedChartType}");
+            
+            if (!Directory.Exists(folderPath))
+                Directory.CreateDirectory(folderPath);
+                
+            return Path.Combine(folderPath, $"TS_Performance_{date:yyyy-MM-dd}.csv");
+        }
+
+        private string GetOptimizationLogPath(DateTime date)
+        {
+            string basePath = @"G:\My Drive\Trading\Data\TrendSpotterData";
+            string folderPath = Path.Combine(basePath, $"TS {cachedInstrumentName} {cachedChartType}");
+            
+            if (!Directory.Exists(folderPath))
+                Directory.CreateDirectory(folderPath);
+                
+            return Path.Combine(folderPath, $"TS_Optimization_{date:yyyy-MM-dd}.csv");
+        }
+
+        private void WritePerformanceHeader()
+        {
+            if (performanceHeaderWritten || string.IsNullOrEmpty(performanceLogFile)) return;
+            
+            // Only write header if enabled
+            if (!WriteCSVHeaders) 
+            {
+                performanceHeaderWritten = true; // Mark as written to prevent future attempts
+                return;
+            }
+
+            try
+            {
+                using (StreamWriter writer = new StreamWriter(performanceLogFile, false))
+                {
+                    writer.WriteLine(
+                        "Instrument,Chart_Type,Chart_Period,Entry_DateTime,Exit_DateTime,Entry_Price,Exit_Price," +
+                        "Trade_Type,Trade_PnL,Max_Favorable_Excursion,Max_Adverse_Excursion," +
+                        "Trade_Duration_Minutes,Entry_Hour,Exit_Hour,Signal_Strength_Score,Exit_Reason"
+                    );
+                }
+                performanceHeaderWritten = true;
+            }
+            catch (Exception ex)
+            {
+                Print($"Error writing performance header: {ex.Message}");
+            }
+        }
+
+        private void WriteOptimizationHeader()
+        {
+            if (optimizationHeaderWritten || string.IsNullOrEmpty(optimizationLogFile)) return;
+
+            try
+            {
+                using (StreamWriter writer = new StreamWriter(optimizationLogFile, false))
+                {
+                    writer.WriteLine(
+                        "MACD_Value,MACD_Signal,MACD_Rising,ADX_Value,DI_Plus,DI_Minus,DI_Spread," +
+                        "Price_vs_EMA,Volume_Ratio,Condition1,Condition2,Condition3,Condition4,Condition5,Condition6," +
+                        "Signal_Quality_Score,Option2_Exit_Used,Failed_Within_3_Bars," +
+                        "Trade_Event,Market_Regime,ATR_Value,Signal_Duration_Bars,Conditions_Met_Count"
+                    );
+                }
+                optimizationHeaderWritten = true;
+            }
+            catch (Exception ex)
+            {
+                Print($"Error writing optimization header: {ex.Message}");
+            }
+        }
+
+		private void FlushPerformanceBuffer()
+		{
+		    if (performanceBuffer.Count == 0 || string.IsNullOrEmpty(performanceLogFile)) return;
+		
+		    try
+		    {
+		        // Simple duplicate prevention: check if file exists and has content
+		        bool fileExists = File.Exists(performanceLogFile);
+		        HashSet<string> existingTrades = new HashSet<string>();
+		        
+		        if (fileExists)
+		        {
+		            var existingLines = File.ReadAllLines(performanceLogFile);
+		            foreach (var line in existingLines.Skip(1)) // Skip header
+		            {
+		                if (!string.IsNullOrWhiteSpace(line))
+		                {
+		                    existingTrades.Add(line.Trim());
+		                }
+		            }
+		        }
+		
+		        using (StreamWriter writer = new StreamWriter(performanceLogFile, true))
+		        {
+		            while (performanceBuffer.Count > 0)
+		            {
+		                var trade = performanceBuffer.Dequeue();
+		                string tradeString = FormatPerformanceEvent(trade);
+		                
+		                // Only write if this exact trade doesn't exist
+		                if (!existingTrades.Contains(tradeString))
+		                {
+		                    writer.WriteLine(tradeString);
+		                    existingTrades.Add(tradeString); // Track for this session
+		                }
+		            }
+		        }
+		    }
+		    catch (Exception ex)
+		    {
+		        Print($"Error flushing performance buffer: {ex.Message}");
+		    }
+		}
+
+        private void FlushOptimizationBuffer()
+        {
+            if (optimizationBuffer.Count == 0 || string.IsNullOrEmpty(optimizationLogFile)) return;
+
+            try
+            {
+                using (StreamWriter writer = new StreamWriter(optimizationLogFile, true))
+                {
+                    while (optimizationBuffer.Count > 0)
+                    {
+                        var opt = optimizationBuffer.Dequeue();
+                        writer.WriteLine(FormatOptimizationEvent(opt));
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Print($"Error flushing optimization buffer: {ex.Message}");
+            }
+        }
+
+        private void FlushAllBuffers()
+        {
+            FlushPerformanceBuffer();
+            FlushOptimizationBuffer();
+        }
+
+        private string FormatPerformanceEvent(TradeEvent trade)
+        {
+            // Now always output complete trade rows
+            return $"{trade.Instrument},{trade.ChartType},{trade.ChartPeriod}," +
+                   $"{trade.EntryDateTime:yyyy-MM-dd HH:mm:ss},{trade.ExitDateTime:yyyy-MM-dd HH:mm:ss}," +
+                   $"{trade.EntryPrice:F2},{trade.ExitPrice:F2}," +
+                   $"{trade.TradeType},{trade.TradePnL:F2},{trade.MaxFavorableExcursion:F2},{trade.MaxAdverseExcursion:F2}," +
+                   $"{trade.TradeDurationMinutes:F1},{trade.EntryHour},{trade.ExitHour},{trade.SignalStrengthScore},{trade.ExitReason}";
+        }
+
+        private string FormatOptimizationEvent(OptimizationEvent opt)
+        {
+            return $"{opt.MacdValue:F4},{opt.MacdSignal:F4},{opt.MacdRising}," +
+                   $"{opt.AdxValue:F2},{opt.DiPlus:F2},{opt.DiMinus:F2},{opt.DiSpread:F2}," +
+                   $"{opt.PriceVsEma:F2},{opt.VolumeRatio:F2}," +
+                   $"{opt.Condition1},{opt.Condition2},{opt.Condition3},{opt.Condition4},{opt.Condition5},{opt.Condition6}," +
+                   $"{opt.SignalQualityScore},{opt.Option2ExitUsed},{opt.FailedWithin3Bars}," +
+                   $"{opt.TradeEvent},{opt.MarketRegime},{opt.AtrValue:F2},{opt.SignalDurationBars},{opt.ConditionsMetCount}";
+        }
+
+        #endregion
+
+        private void DrawSignalsOptimized(bool currentLongSignal, bool currentShortSignal, bool longExit, bool shortExit)
+        {
+            if (ShowEntrySignals)
+            {
+                // Entry arrows - only on first bar of new signal
+                if (currentLongSignal && !wasLongSignal)
+                {
+                    Draw.ArrowUp(this, LongOn + CurrentBar.ToString(), true, 0, 
+                               Low[0] - Signal_Offset * TickSize, LongEntryColor);
+                }
+                else if (currentShortSignal && !wasShortSignal)
+                {
+                    Draw.ArrowDown(this, ShortOn + CurrentBar.ToString(), true, 0, 
+                                 High[0] + Signal_Offset * TickSize, ShortEntryColor);
+                }
+
+                // Optimized background color logic - ONLY when partial signals enabled
+                if (ShowPartialSignals)
+                {
+                    SetBackgroundColor();
+                }
+            }
+
+            if (ShowExitSignals && CurrentBar > 1)
+            {
+                if (longExit)
+                {
+                    Draw.Text(this, LongOff + CurrentBar, true, "o", 0, 
+                             High[0] + Signal_Offset * TickSize, 0, ExitColor,
+                             new SimpleFont("Arial", 12), System.Windows.TextAlignment.Center, 
+                             Brushes.Transparent, Brushes.Transparent, 0);
+                }
+                if (shortExit)
+                {
+                    Draw.Text(this, ShortOff + CurrentBar, true, "o", 0, 
+                             Low[0] - Signal_Offset * TickSize, 0, ExitColor,
+                             new SimpleFont("Arial", 12), System.Windows.TextAlignment.Center, 
+                             Brushes.Transparent, Brushes.Transparent, 0);
+                }
+            }
+        }
+
+        private void SetBackgroundColor()
+        {
+            if (!inLongTrend && !inShortTrend)
+            {
+                if (longConditionCount == 5)
+                {
+                    BackBrush = CreateBrushWithOpacity(PartialLongSignalColor, PartialSignalOpacity);
+                }
+                else if (shortConditionCount == 5)
+                {
+                    BackBrush = CreateBrushWithOpacity(PartialShortSignalColor, PartialSignalOpacity);
+                }
+                else
+                {
+                    BackBrush = Brushes.Transparent;
+                }
+            }
+            else
+            {
+                BackBrush = Brushes.Transparent;
+            }
+        }
+
+        private void UpdateSignalFlags(bool currentLongSignal, bool currentShortSignal, bool longExit, bool shortExit)
+        {
+            // FIXED: Clear signal flags properly on exit
+            if (longExit || shortExit)
+            {
+                wasLongSignal = false;
+                wasShortSignal = false;
+                
+                // ADDITIONAL SAFETY: Ensure trend flags are cleared
+                if (longExit) inLongTrend = false;
+                if (shortExit) inShortTrend = false;
+            }
+            // FIXED: Don't keep resetting flags during active trends
+            else if (inLongTrend || inShortTrend)
+            {
+                // Keep existing signal state during trend - don't change wasLongSignal/wasShortSignal
+                // This prevents false "new signal" detection during ongoing trends
+            }
+            else
+            {
+                // Only update signal flags when not in active trends
+                wasLongSignal = currentLongSignal;
+                wasShortSignal = currentShortSignal;
+            }
+        }
+
+		     private bool IsWithinTradingHours(DateTime barTime)
+		{
+		    TimeSpan timeOfDay = barTime.TimeOfDay;
+		    return timeOfDay >= TradingStartTime && timeOfDay < TradingEndTime;
+		}
+
+        private int CalculateSignalStrengthScore()
+        {
+            int score = 0;
+
+            // Core conditions (using cached values)
+            if (cachedMacdValue > cachedMacdAvg) score += 20;
+            if (CurrentBar > 0 && cachedMacdValue > GetPreviousMACDValue()) score += 20;
+            if (currentDISpread > 10) score += 20;
+
+            // Quality multipliers
+            if (cachedADX > 25) score += 15;
+            if (cachedMacdValue > 0) score += 10;
+            if ((Close[0] - cachedEMAValue) / cachedEMAValue > 0.001) score += 10;
+            if (cachedADX > dm.ADXPlot[1]) score += 5;
+
+            return Math.Min(score, 100);
+        }
+
+			private double CalculateTradePnL()
+			{
+			    if (currentTradeEntry == null)
+			    {
+			        return 0;
+			    }
+			
+			    double exitPrice = Close[0];
+			    double pointValue = Instrument.MasterInstrument.PointValue;
+			    
+			    // Use the stored entry price from currentTradeEntry (more reliable)
+			    double entryPriceForCalc = currentTradeEntry.EntryPrice;
+			    
+			    // Calculate based on stored trade type
+			    if (currentTradeEntry.TradeType == "Long")
+			    {
+			        return (exitPrice - entryPriceForCalc) * pointValue;
+			    }
+			    else if (currentTradeEntry.TradeType == "Short")
+			    {
+			        return (entryPriceForCalc - exitPrice) * pointValue;
+			    }
+			
+			    return 0;
+			}
+
+        private double CalculateTradeDuration()
+        {
+            if (tradeEntryTime == DateTime.MinValue) return 0;
+            return (Time[0] - tradeEntryTime).TotalMinutes;
+        }
+
+        private string DetermineMarketRegime()
+        {
+            try
+            {
+                // Use ADX and ATR to determine market regime
+                double atrNormalized = cachedATRValue / Close[0] * 100; // ATR as percentage of price
+                
+                if (cachedADX > 25 && atrNormalized > 0.5)
+                    return "Trending";
+                else if (cachedADX < 20 && atrNormalized < 0.3)
+                    return "Ranging";
+                else if (atrNormalized > 0.8)
+                    return "Volatile";
+                else
+                    return "Transitional";
+            }
+            catch (Exception ex)
+            {
+                Print($"Market regime detection error: {ex.Message}");
+                return "Unknown";
+            }
+        }
+
+        private string DetermineExitReason()
+        {
+            if (useOption3ForTimeframe)
+                return "ConditionFalse";
+            else if (macdMomentumLoss && adxWeakening)
+                return "MACD+ADX";
+            else if (macdMomentumLoss && diWeakening)
+                return "MACD+DI";
+            else
+                return "Other";
+        }
+
+        private string DetermineChartTypeFolder()
+        {
+            try
+            {
+                var chartType = BarsPeriod.BarsPeriodType.ToString();
+                int periodValue = BarsPeriod.Value;
+
+                // Handle custom chart types
+                if ((int)BarsPeriod.BarsPeriodType == 12345)
+                {
+                    return BarsPeriod.Value2 > 0 ? $"NR{BarsPeriod.Value}{BarsPeriod.Value2}" : $"NR{BarsPeriod.Value}";
+                }
+
+                return BarsPeriod.BarsPeriodType switch
+                {
+                    BarsPeriodType.Minute => $"M{periodValue}",
+                    BarsPeriodType.Second => $"S{periodValue}",
+                    BarsPeriodType.Tick => $"{periodValue}T",
+                    BarsPeriodType.Volume => $"{periodValue}V",
+                    BarsPeriodType.Range => $"R{periodValue}",
+                    BarsPeriodType.Renko => $"R{(int)BarsPeriod.Value}",
+                    _ => chartType
+                };
+            }
+            catch (Exception ex)
+            {
+                Print($"Chart type detection error: {ex.Message}");
+                return "Unknown";
+            }
+        }
+
+        private Brush CreateBrushWithOpacity(Brush baseBrush, int opacity)
+        {
+            if (baseBrush is SolidColorBrush solidBrush)
+            {
+                Color color = solidBrush.Color;
+                color.A = (byte)(255 * opacity / 100);
+                return new SolidColorBrush(color);
+            }
+            return baseBrush;
+        }
+
+        // Debug mode detection method
+        private void DetectDuplicateAttempts(bool currentLongSignal, bool currentShortSignal, bool longExit, bool shortExit)
+        {
+            if (!DuplicateDetectionMode) return;
+            
+            string currentState = $"Bar:{CurrentBar} Time:{Time[0]:HH:mm:ss} Long:{currentLongSignal} Short:{currentShortSignal} LongExit:{longExit} ShortExit:{shortExit}";
+            
+            if (currentLongSignal && !wasLongSignal)
+                Print($"ENTRY ATTEMPT: Long - {currentState}");
+            if (currentShortSignal && !wasShortSignal)
+                Print($"ENTRY ATTEMPT: Short - {currentState}");
+            if (longExit || shortExit)
+                Print($"EXIT ATTEMPT: - {currentState}");
+        }
+
+        #region Data Structures
+
+        private class TradeEvent
+        {
+            public string Instrument;
+            public string ChartType;
+            public int ChartPeriod;
+            public DateTime EntryDateTime;
+            public DateTime ExitDateTime;
+            public double EntryPrice;
+            public double ExitPrice;
+            public string TradeType;
+            public double TradePnL;
+            public double MaxFavorableExcursion;
+            public double MaxAdverseExcursion;
+            public double TradeDurationMinutes;
+            public int EntryHour;
+            public int ExitHour;
+            public int SignalStrengthScore;
+            public string ExitReason;
+            public bool IsEntry;
+        }
+
+        private class OptimizationEvent
+        {
+            public double MacdValue;
+            public double MacdSignal;
+            public bool MacdRising;
+            public double AdxValue;
+            public double DiPlus;
+            public double DiMinus;
+            public double DiSpread;
+            public double PriceVsEma;
+            public double VolumeRatio;
+            public bool Condition1;
+            public bool Condition2;
+            public bool Condition3;
+            public bool Condition4;
+            public bool Condition5;
+            public bool Condition6;
+            public int SignalQualityScore;
+            public bool Option2ExitUsed;
+            public bool FailedWithin3Bars;
+            public string TradeEvent;
+            public string MarketRegime;
+            public double AtrValue;
+            public int SignalDurationBars;
+            public int ConditionsMetCount;
+        }
+
+        #endregion
+
+        #region Properties
+
+        [NinjaScriptProperty]
+        [Range(1, int.MaxValue)]
+        [Display(Name = "MACD Fast", Order = 1, GroupName = "MACD Settings")]
+        public int MacdFast { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(1, int.MaxValue)]
+        [Display(Name = "MACD Slow", Order = 2, GroupName = "MACD Settings")]
+        public int MacdSlow { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(1, int.MaxValue)]
+        [Display(Name = "MACD Smooth", Order = 3, GroupName = "MACD Settings")]
+        public int MacdSmooth { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "MACD MA Type", Order = 4, GroupName = "MACD Settings")]
+        public CustomEnumNamespace.UniversalMovingAverage MacdMAType { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(1, int.MaxValue)]
+        [Display(Name = "DM Period", Order = 1, GroupName = "DM Settings")]
+        public int DmPeriod { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(1, int.MaxValue)]
+        [Display(Name = "ADX Rising Bars", Order = 2, GroupName = "DM Settings")]
+        public int AdxRisingBars { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(10, 30)]
+		[Display(Name = "Minimum ADX Threshold", Order = 3, GroupName = "DM Settings")]
+		public double MinAdxThreshold { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(1, int.MaxValue)]
+        [Display(Name = "EMA Period", Order = 1, GroupName = "EMA Settings")]
+        public int EmaPeriod { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(1.0, 5.0)]
+        [Display(Name = "Volume Filter Multiplier", Order = 1, GroupName = "Volume Filter Settings")]
+        public double VolumeFilterMultiplier { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Show Entry Signals", Order = 1, GroupName = "Signal Settings")]
+        public bool ShowEntrySignals { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Show Exit Signals", Order = 2, GroupName = "Signal Settings")]
+        public bool ShowExitSignals { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Show Partial Signals", Order = 3, GroupName = "Signal Settings")]
+        public bool ShowPartialSignals { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(0, double.MaxValue)]
+        [Display(Name = "Signal Offset", Order = 4, GroupName = "Signal Settings")]
+        public double Signal_Offset { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Long On", Order = 5, GroupName = "Signal Settings")]
+        public string LongOn { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Short On", Order = 6, GroupName = "Signal Settings")]
+        public string ShortOn { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Long Off", Order = 7, GroupName = "Signal Settings")]
+        public string LongOff { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Short Off", Order = 8, GroupName = "Signal Settings")]
+        public string ShortOff { get; set; }
+
+        [NinjaScriptProperty]
+        [XmlIgnore]
+        [Display(Name = "Partial Long Signal Color", Order = 1, GroupName = "Background Colors")]
+        public Brush PartialLongSignalColor { get; set; }
+
+        [Browsable(false)]
+        public string PartialLongSignalColorSerializable
+        {
+            get { return Serialize.BrushToString(PartialLongSignalColor); }
+            set { PartialLongSignalColor = Serialize.StringToBrush(value); }
+        }
+
+        [NinjaScriptProperty]
+        [XmlIgnore]
+        [Display(Name = "Partial Short Signal Color", Order = 2, GroupName = "Background Colors")]
+        public Brush PartialShortSignalColor { get; set; }
+
+        [Browsable(false)]
+        public string PartialShortSignalColorSerializable
+        {
+            get { return Serialize.BrushToString(PartialShortSignalColor); }
+            set { PartialShortSignalColor = Serialize.StringToBrush(value); }
+        }
+
+        [NinjaScriptProperty]
+        [Range(1, 100)]
+        [Display(Name = "Partial Signal Opacity", Order = 3, GroupName = "Background Colors")]
+        public int PartialSignalOpacity { get; set; }
+
+        [NinjaScriptProperty]
+        [XmlIgnore]
+        [Display(Name = "Long Entry Color", Order = 1, GroupName = "Entry Arrow Colors")]
+        public Brush LongEntryColor { get; set; }
+
+        [Browsable(false)]
+        public string LongEntryColorSerializable
+        {
+            get { return Serialize.BrushToString(LongEntryColor); }
+            set { LongEntryColor = Serialize.StringToBrush(value); }
+        }
+
+        [NinjaScriptProperty]
+        [XmlIgnore]
+        [Display(Name = "Short Entry Color", Order = 2, GroupName = "Entry Arrow Colors")]
+        public Brush ShortEntryColor { get; set; }
+
+        [Browsable(false)]
+        public string ShortEntryColorSerializable
+        {
+            get { return Serialize.BrushToString(ShortEntryColor); }
+            set { ShortEntryColor = Serialize.StringToBrush(value); }
+        }
+
+        [NinjaScriptProperty]
+        [XmlIgnore]
+        [Display(Name = "Exit Color", Order = 1, GroupName = "Exit Signal Settings")]
+        public Brush ExitColor { get; set; }
+
+        [Browsable(false)]
+        public string ExitColorSerializable
+        {
+            get { return Serialize.BrushToString(ExitColor); }
+            set { ExitColor = Serialize.StringToBrush(value); }
+        }
+
+        // SPLIT TRACKING CONTROLS (NEW)
+        [NinjaScriptProperty]
+        [Display(Name = "Enable Performance Tracking", Order = 1, GroupName = "Data Tracking Settings")]
+        public bool EnablePerformanceTracking { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Enable Optimization Tracking", Order = 2, GroupName = "Data Tracking Settings")]
+        public bool EnableOptimizationTracking { get; set; }
+		
+		[NinjaScriptProperty]
+		[Display(Name = "Write CSV Headers", Order = 3, GroupName = "Data Tracking Settings")]
+		public bool WriteCSVHeaders { get; set; }
+
+        // SMART HISTORICAL COLLECTION (NEW)
+        [NinjaScriptProperty]
+        [Display(Name = "Enable Historical Data Collection", Order = 4, GroupName = "Data Tracking Settings")]
+        public bool EnableHistoricalDataCollection { get; set; }
+		
+		// TIME SETTINGS
+		[NinjaScriptProperty]
+		[PropertyEditor("NinjaTrader.Gui.Tools.TimeEditorKey")]
+		[Display(Name = "Trading Start Time", Order = 1, GroupName = "Trading Hours Settings")]
+		public TimeSpan TradingStartTime { get; set; }
+		
+		[NinjaScriptProperty]
+		[PropertyEditor("NinjaTrader.Gui.Tools.TimeEditorKey")]
+		[Display(Name = "Trading End Time", Order = 2, GroupName = "Trading Hours Settings")]
+		public TimeSpan TradingEndTime { get; set; }
+
+        // DEBUG SETTINGS
+        [NinjaScriptProperty]
+        [Display(Name = "Duplicate Detection Mode", Order = 10, GroupName = "Debug Settings")]
+        public bool DuplicateDetectionMode { get; set; }
+		
+
+        #endregion
+    }
+}
+
+#region NinjaScript generated code. Neither change nor remove.
+
+namespace NinjaTrader.NinjaScript.Indicators
+{
+	public partial class Indicator : NinjaTrader.Gui.NinjaScript.IndicatorRenderBase
+	{
+		private Myindicators.TrendSpotter[] cacheTrendSpotter;
+		public Myindicators.TrendSpotter TrendSpotter(int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, double minAdxThreshold, int emaPeriod, double volumeFilterMultiplier, bool showEntrySignals, bool showExitSignals, bool showPartialSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialLongSignalColor, Brush partialShortSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enablePerformanceTracking, bool enableOptimizationTracking, bool writeCSVHeaders, bool enableHistoricalDataCollection, TimeSpan tradingStartTime, TimeSpan tradingEndTime, bool duplicateDetectionMode)
+		{
+			return TrendSpotter(Input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, minAdxThreshold, emaPeriod, volumeFilterMultiplier, showEntrySignals, showExitSignals, showPartialSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialLongSignalColor, partialShortSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor, enablePerformanceTracking, enableOptimizationTracking, writeCSVHeaders, enableHistoricalDataCollection, tradingStartTime, tradingEndTime, duplicateDetectionMode);
+		}
+
+		public Myindicators.TrendSpotter TrendSpotter(ISeries<double> input, int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, double minAdxThreshold, int emaPeriod, double volumeFilterMultiplier, bool showEntrySignals, bool showExitSignals, bool showPartialSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialLongSignalColor, Brush partialShortSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enablePerformanceTracking, bool enableOptimizationTracking, bool writeCSVHeaders, bool enableHistoricalDataCollection, TimeSpan tradingStartTime, TimeSpan tradingEndTime, bool duplicateDetectionMode)
+		{
+			if (cacheTrendSpotter != null)
+				for (int idx = 0; idx < cacheTrendSpotter.Length; idx++)
+					if (cacheTrendSpotter[idx] != null && cacheTrendSpotter[idx].MacdFast == macdFast && cacheTrendSpotter[idx].MacdSlow == macdSlow && cacheTrendSpotter[idx].MacdSmooth == macdSmooth && cacheTrendSpotter[idx].MacdMAType == macdMAType && cacheTrendSpotter[idx].DmPeriod == dmPeriod && cacheTrendSpotter[idx].AdxRisingBars == adxRisingBars && cacheTrendSpotter[idx].MinAdxThreshold == minAdxThreshold && cacheTrendSpotter[idx].EmaPeriod == emaPeriod && cacheTrendSpotter[idx].VolumeFilterMultiplier == volumeFilterMultiplier && cacheTrendSpotter[idx].ShowEntrySignals == showEntrySignals && cacheTrendSpotter[idx].ShowExitSignals == showExitSignals && cacheTrendSpotter[idx].ShowPartialSignals == showPartialSignals && cacheTrendSpotter[idx].Signal_Offset == signal_Offset && cacheTrendSpotter[idx].LongOn == longOn && cacheTrendSpotter[idx].ShortOn == shortOn && cacheTrendSpotter[idx].LongOff == longOff && cacheTrendSpotter[idx].ShortOff == shortOff && cacheTrendSpotter[idx].PartialLongSignalColor == partialLongSignalColor && cacheTrendSpotter[idx].PartialShortSignalColor == partialShortSignalColor && cacheTrendSpotter[idx].PartialSignalOpacity == partialSignalOpacity && cacheTrendSpotter[idx].LongEntryColor == longEntryColor && cacheTrendSpotter[idx].ShortEntryColor == shortEntryColor && cacheTrendSpotter[idx].ExitColor == exitColor && cacheTrendSpotter[idx].EnablePerformanceTracking == enablePerformanceTracking && cacheTrendSpotter[idx].EnableOptimizationTracking == enableOptimizationTracking && cacheTrendSpotter[idx].WriteCSVHeaders == writeCSVHeaders && cacheTrendSpotter[idx].EnableHistoricalDataCollection == enableHistoricalDataCollection && cacheTrendSpotter[idx].TradingStartTime == tradingStartTime && cacheTrendSpotter[idx].TradingEndTime == tradingEndTime && cacheTrendSpotter[idx].DuplicateDetectionMode == duplicateDetectionMode && cacheTrendSpotter[idx].EqualsInput(input))
+						return cacheTrendSpotter[idx];
+			return CacheIndicator<Myindicators.TrendSpotter>(new Myindicators.TrendSpotter(){ MacdFast = macdFast, MacdSlow = macdSlow, MacdSmooth = macdSmooth, MacdMAType = macdMAType, DmPeriod = dmPeriod, AdxRisingBars = adxRisingBars, MinAdxThreshold = minAdxThreshold, EmaPeriod = emaPeriod, VolumeFilterMultiplier = volumeFilterMultiplier, ShowEntrySignals = showEntrySignals, ShowExitSignals = showExitSignals, ShowPartialSignals = showPartialSignals, Signal_Offset = signal_Offset, LongOn = longOn, ShortOn = shortOn, LongOff = longOff, ShortOff = shortOff, PartialLongSignalColor = partialLongSignalColor, PartialShortSignalColor = partialShortSignalColor, PartialSignalOpacity = partialSignalOpacity, LongEntryColor = longEntryColor, ShortEntryColor = shortEntryColor, ExitColor = exitColor, EnablePerformanceTracking = enablePerformanceTracking, EnableOptimizationTracking = enableOptimizationTracking, WriteCSVHeaders = writeCSVHeaders, EnableHistoricalDataCollection = enableHistoricalDataCollection, TradingStartTime = tradingStartTime, TradingEndTime = tradingEndTime, DuplicateDetectionMode = duplicateDetectionMode }, input, ref cacheTrendSpotter);
+		}
+	}
+}
+
+namespace NinjaTrader.NinjaScript.MarketAnalyzerColumns
+{
+	public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
+	{
+		public Indicators.Myindicators.TrendSpotter TrendSpotter(int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, double minAdxThreshold, int emaPeriod, double volumeFilterMultiplier, bool showEntrySignals, bool showExitSignals, bool showPartialSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialLongSignalColor, Brush partialShortSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enablePerformanceTracking, bool enableOptimizationTracking, bool writeCSVHeaders, bool enableHistoricalDataCollection, TimeSpan tradingStartTime, TimeSpan tradingEndTime, bool duplicateDetectionMode)
+		{
+			return indicator.TrendSpotter(Input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, minAdxThreshold, emaPeriod, volumeFilterMultiplier, showEntrySignals, showExitSignals, showPartialSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialLongSignalColor, partialShortSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor, enablePerformanceTracking, enableOptimizationTracking, writeCSVHeaders, enableHistoricalDataCollection, tradingStartTime, tradingEndTime, duplicateDetectionMode);
+		}
+
+		public Indicators.Myindicators.TrendSpotter TrendSpotter(ISeries<double> input , int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, double minAdxThreshold, int emaPeriod, double volumeFilterMultiplier, bool showEntrySignals, bool showExitSignals, bool showPartialSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialLongSignalColor, Brush partialShortSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enablePerformanceTracking, bool enableOptimizationTracking, bool writeCSVHeaders, bool enableHistoricalDataCollection, TimeSpan tradingStartTime, TimeSpan tradingEndTime, bool duplicateDetectionMode)
+		{
+			return indicator.TrendSpotter(input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, minAdxThreshold, emaPeriod, volumeFilterMultiplier, showEntrySignals, showExitSignals, showPartialSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialLongSignalColor, partialShortSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor, enablePerformanceTracking, enableOptimizationTracking, writeCSVHeaders, enableHistoricalDataCollection, tradingStartTime, tradingEndTime, duplicateDetectionMode);
+		}
+	}
+}
+
+namespace NinjaTrader.NinjaScript.Strategies
+{
+	public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
+	{
+		public Indicators.Myindicators.TrendSpotter TrendSpotter(int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, double minAdxThreshold, int emaPeriod, double volumeFilterMultiplier, bool showEntrySignals, bool showExitSignals, bool showPartialSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialLongSignalColor, Brush partialShortSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enablePerformanceTracking, bool enableOptimizationTracking, bool writeCSVHeaders, bool enableHistoricalDataCollection, TimeSpan tradingStartTime, TimeSpan tradingEndTime, bool duplicateDetectionMode)
+		{
+			return indicator.TrendSpotter(Input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, minAdxThreshold, emaPeriod, volumeFilterMultiplier, showEntrySignals, showExitSignals, showPartialSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialLongSignalColor, partialShortSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor, enablePerformanceTracking, enableOptimizationTracking, writeCSVHeaders, enableHistoricalDataCollection, tradingStartTime, tradingEndTime, duplicateDetectionMode);
+		}
+
+		public Indicators.Myindicators.TrendSpotter TrendSpotter(ISeries<double> input , int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, double minAdxThreshold, int emaPeriod, double volumeFilterMultiplier, bool showEntrySignals, bool showExitSignals, bool showPartialSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialLongSignalColor, Brush partialShortSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enablePerformanceTracking, bool enableOptimizationTracking, bool writeCSVHeaders, bool enableHistoricalDataCollection, TimeSpan tradingStartTime, TimeSpan tradingEndTime, bool duplicateDetectionMode)
+		{
+			return indicator.TrendSpotter(input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, minAdxThreshold, emaPeriod, volumeFilterMultiplier, showEntrySignals, showExitSignals, showPartialSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialLongSignalColor, partialShortSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor, enablePerformanceTracking, enableOptimizationTracking, writeCSVHeaders, enableHistoricalDataCollection, tradingStartTime, tradingEndTime, duplicateDetectionMode);
+		}
+	}
+}
+
+#endregion
