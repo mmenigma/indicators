@@ -1,0 +1,107 @@
+//1. Add these new private variables near your other field declarations:
+private DateTime lastLoggedTime = DateTime.MinValue;
+private bool isLoggingInitialized = false;
+
+//2. Add this logging initialization method (call it once in OnStateChange or on first bar):
+private void InitializeLogging()
+{
+    if (isLoggingInitialized)
+        return;
+
+    currentLogFile = GetOptimizedLogFilePath(Time[0]);
+
+    if (File.Exists(currentLogFile))
+    {
+        lastLoggedTime = GetLastLoggedTimestamp(currentLogFile);
+        headerWritten = true;  // assume header exists if file does
+    }
+    else
+    {
+        lastLoggedTime = DateTime.MinValue;
+        headerWritten = false;
+    }
+
+    isLoggingInitialized = true;
+}
+
+private DateTime GetLastLoggedTimestamp(string filePath)
+{
+    try
+    {
+        string lastLine = File.ReadLines(filePath).LastOrDefault();
+        if (string.IsNullOrEmpty(lastLine))
+            return DateTime.MinValue;
+
+        var fields = lastLine.Split(',');
+        if (fields.Length == 0)
+            return DateTime.MinValue;
+
+        DateTime dt;
+        if (DateTime.TryParse(fields[0], out dt))
+            return dt;
+    }
+    catch
+    {
+        // ignore errors reading file
+    }
+    return DateTime.MinValue;
+}
+
+//3. Call InitializeLogging() once during indicator initialization—e.g., in OnStateChange when State == State.DataLoaded or at first call to OnBarUpdate if needed.
+protected override void OnBarUpdate()
+{
+    if (!isLoggingInitialized)
+        InitializeLogging();
+
+    // your existing OnBarUpdate logic...
+}
+
+//4. Modify your data logging method where you add to the CSV buffer, to skip writing if current bar’s timestamp is already logged:
+private void BufferOptimizedDataForAnalysis(bool currentLongSignal, bool currentShortSignal, bool longExit, bool shortExit)
+{
+    DateTime barTime = Time[0];
+
+    // Prevent duplicate logging for same bar time
+    if (barTime <= lastLoggedTime)
+        return;
+
+    // existing logging logic to build CSV line and add to buffer
+
+    logBuffer.Add(logEntry);
+
+    // update last logged time
+    lastLoggedTime = barTime;
+
+    // flush buffer if needed...
+}
+
+//5: Example FlushLogBuffer() (ensure no change needed if present)
+private void FlushLogBuffer()
+{
+    if (logBuffer.Count == 0)
+        return;
+
+    try
+    {
+        File.AppendAllLines(currentLogFile, logBuffer);
+        logBuffer.Clear();
+    }
+    catch (Exception ex)
+    {
+        Print($"Error flushing log buffer to file: {ex.Message}");
+    }
+}
+
+//6: Sample WriteOptimizedHeader() (unchanged if you have it)
+private void WriteOptimizedHeader()
+{
+    try
+    {
+        string header = "Timestamp,LongSignal,ShortSignal,LongExit,ShortExit"; // Add your actual header columns
+        File.AppendAllLines(currentLogFile, new[] { header });
+    }
+    catch (Exception ex)
+    {
+        Print($"Error writing header: {ex.Message}");
+    }
+}
