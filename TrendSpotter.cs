@@ -3,6 +3,7 @@
 ///6-28 Optimization CSV: Optional detailed analysis (can be disabled)
 ///6-28 added partial signal toggle
 ///7-3 DUPLICATE PREVENTION FIX ADDED
+///7-11 SIGNAL QUALITY FILTER IMPLEMENTATION ADDED
 #region Using declarations
 using System;
 using System.Collections.Generic;
@@ -75,6 +76,10 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
         private string lastMarketRegime;
 		private TradeEvent currentTradeEntry;
 
+        // Signal Quality Filter Variables
+        private bool enableSignalQualityFilter = true;  // Will be controlled by property
+        private int signalQualityThreshold = 45;        // Will be controlled by property
+
         // Ultra-Lightweight Logging Variables
         private Queue<TradeEvent> performanceBuffer = new Queue<TradeEvent>(5);
         private Queue<OptimizationEvent> optimizationBuffer = new Queue<OptimizationEvent>(20);
@@ -110,7 +115,7 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
         {
             if (State == State.SetDefaults)
             {
-                Description = @"TrendSpotter Trading Signal Indicator - Ultra-Optimized with Split Performance/Optimization Tracking";
+                Description = @"TrendSpotter Trading Signal Indicator - Ultra-Optimized with Signal Quality Filter";
                 Name = "TrendSpotter";
                 Calculate = Calculate.OnBarClose;
                 IsOverlay = true;
@@ -160,6 +165,10 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                 EnablePerformanceTracking = true;
                 EnableOptimizationTracking = false;  // Default OFF for live trading
 				WriteCSVHeaders = false;  // Default OFF to prevent header issues
+
+                // Signal Quality Filter Settings
+                EnableSignalQualityFilter = true;   // Default ON for optimization
+                SignalQualityThreshold = 45;        // Optimal threshold from analysis
 				
 				// ADD TRADING HOURS DEFAULTS HERE:
 				TradingStartTime = new TimeSpan(0, 0, 0);     // Shows as "12:00 AM"
@@ -287,9 +296,27 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
             // Volume filter confirmation (using cached values)
             volumeConfirmed = cachedCurrentVolume > cachedVolSMAVal * VolumeFilterMultiplier;
 
-            // Current signals including volume filter
-            bool currentLongSignal = (longConditionCount == 6) && volumeConfirmed;
-            bool currentShortSignal = (shortConditionCount == 6) && volumeConfirmed;
+            // Calculate 6-condition signals
+            bool rawLongSignal = (longConditionCount == 6) && volumeConfirmed;
+            bool rawShortSignal = (shortConditionCount == 6) && volumeConfirmed;
+
+            // SIGNAL QUALITY FILTER APPLICATION
+            bool signalPassedFilter = true;
+            string rejectionReason = "Accepted";
+            int signalQuality = CalculateSignalStrengthScore();
+            
+            if (EnableSignalQualityFilter && (rawLongSignal || rawShortSignal))
+            {
+                if (signalQuality < SignalQualityThreshold)
+                {
+                    signalPassedFilter = false;
+                    rejectionReason = $"Quality {signalQuality} < {SignalQualityThreshold}";
+                }
+            }
+
+            // Apply filter to signals
+            bool currentLongSignal = rawLongSignal && signalPassedFilter;
+            bool currentShortSignal = rawShortSignal && signalPassedFilter;
 
             // Calculate exit conditions and determine exit signals
             bool longExit, shortExit;
@@ -298,13 +325,14 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
             // Update performance tracking during trends
             UpdatePerformanceTracking();
 
-            // ULTRA-LIGHTWEIGHT LOGGING: Only on trade events
-            LogTradeEvents(currentLongSignal, currentShortSignal, longExit, shortExit);
+            // ENHANCED LOGGING: Include filter information
+            LogTradeEventsWithFilter(currentLongSignal, currentShortSignal, longExit, shortExit, 
+                                   rawLongSignal, rawShortSignal, signalQuality, signalPassedFilter, rejectionReason);
 
-            // Update trend status with optimized entry tracking
+            // Update trend status with filtered signals
             UpdateTrendStatus(currentLongSignal, currentShortSignal, longExit, shortExit);
 
-            // Draw signals with optimized drawing logic
+            // Draw signals with filtered logic
             DrawSignalsOptimized(currentLongSignal, currentShortSignal, longExit, shortExit);
 
             // Update signal tracking flags efficiently
@@ -516,12 +544,15 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
             entryHour = time.Hour;
         }
 
-        #region ULTRA-LIGHTWEIGHT LOGGING SYSTEM
+        #region ENHANCED LOGGING WITH SIGNAL QUALITY FILTER
 
-        // PERFORMANCE LOGGING: Trade events only (minimal overhead)
-        private void LogTradeEvents(bool currentLongSignal, bool currentShortSignal, bool longExit, bool shortExit)
+        // Updated logging function with filter tracking
+        private void LogTradeEventsWithFilter(bool currentLongSignal, bool currentShortSignal, 
+                                            bool longExit, bool shortExit,
+                                            bool rawLongSignal, bool rawShortSignal,
+                                            int signalQuality, bool signalAccepted, string rejectionReason)
         {
-            // Performance tracking: Only log actual trade events
+            // Performance tracking: Only log actual trade events (filtered signals)
             if (EnablePerformanceTracking)
             {
                 if (currentLongSignal && !wasLongSignal)
@@ -532,10 +563,11 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                     LogPerformanceExit();
             }
 
-            // Optimization tracking: Can log more frequently if enabled
-            if (EnableOptimizationTracking && (currentLongSignal || currentShortSignal || longExit || shortExit))
+            // Optimization tracking: Log all signal events (including rejected)
+            if (EnableOptimizationTracking && (rawLongSignal || rawShortSignal || longExit || shortExit))
             {
-                LogOptimizationData(currentLongSignal, currentShortSignal, longExit, shortExit);
+                LogOptimizationDataWithFilter(currentLongSignal, currentShortSignal, longExit, shortExit,
+                                            signalQuality, signalAccepted, rejectionReason);
             }
         }
 
@@ -624,7 +656,9 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
 				    }
 				}
 
-        private void LogOptimizationData(bool longEntry, bool shortEntry, bool longExit, bool shortExit)
+        // Enhanced optimization logging with streamlined fields and filter data
+        private void LogOptimizationDataWithFilter(bool longEntry, bool shortEntry, bool longExit, bool shortExit,
+                                                 int signalQuality, bool signalAccepted, string rejectionReason)
         {
             try
             {
@@ -637,64 +671,57 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                 if (longEntry || shortEntry) tradeEvent = "Entry";
                 else if (longExit || shortExit) tradeEvent = "Exit";
 
-                // Update signal duration tracking
-                bool hasSignal = (longConditionCount == 6 && volumeConfirmed) || (shortConditionCount == 6 && volumeConfirmed);
-                if (hasSignal)
-                    signalDurationBars++;
-                else
-                    signalDurationBars = 0;
-
-                // Update win streak tracking
-                if (longExit || shortExit)
-                {
-                    double tradePnL = CalculateTradePnL();
-                    if (tradePnL > 0)
-                        recentWinStreak = recentWinStreak >= 0 ? recentWinStreak + 1 : 1;
-                    else if (tradePnL < 0)
-                        recentWinStreak = recentWinStreak <= 0 ? recentWinStreak - 1 : -1;
-                }
-
                 // Determine market regime
                 string marketRegime = DetermineMarketRegime();
 
-                // Count conditions met
-                int conditionsMet = Math.Max(longConditionCount, shortConditionCount);
-
                 var opt = new OptimizationEvent
                 {
+                    // Core Technical Indicators (6 fields)
                     MacdValue = cachedMacdValue,
                     MacdSignal = cachedMacdAvg,
                     MacdRising = CurrentBar > 0 ? cachedMacdValue > GetPreviousMACDValue() : false,
                     AdxValue = cachedADX,
-                    DiPlus = cachedDIPlus,
-                    DiMinus = cachedDIMinus,
-                    DiSpread = currentDISpread,
-                    PriceVsEma = (Close[0] - cachedEMAValue) / cachedEMAValue * 100,
+                    DiSpread = currentDISpread,  // More useful than individual DI+ and DI-
                     VolumeRatio = cachedCurrentVolume / cachedVolSMAVal,
+                    
+                    // Condition Tracking (6 fields)
                     Condition1 = (longEntry || inLongTrend) ? longCondition1 : shortCondition1,
                     Condition2 = (longEntry || inLongTrend) ? longCondition2 : shortCondition2,
                     Condition3 = (longEntry || inLongTrend) ? longCondition3 : shortCondition3,
                     Condition4 = (longEntry || inLongTrend) ? longCondition4 : shortCondition4,
                     Condition5 = (longEntry || inLongTrend) ? longCondition5 : shortCondition5,
                     Condition6 = (longEntry || inLongTrend) ? longCondition6 : shortCondition6,
-                    SignalQualityScore = CalculateSignalStrengthScore(),
-                    Option2ExitUsed = !useOption3ForTimeframe,
+                    
+                    // Performance & Classification (4 fields)
+                    SignalQualityScore = signalQuality,
                     FailedWithin3Bars = (barsInTrend > 0 && barsInTrend <= 3 && (longExit || shortExit)),
                     TradeEvent = tradeEvent,
                     MarketRegime = marketRegime,
-                    AtrValue = cachedATRValue,
-                    SignalDurationBars = signalDurationBars,
-                    ConditionsMetCount = conditionsMet
+                    
+                    // NEW: Signal Quality Filter Fields (3 fields)
+                    Signal_Accepted = signalAccepted,
+                    Filter_Threshold = EnableSignalQualityFilter ? SignalQualityThreshold : 0,
+                    Quality_Score_Bucket = GetQualityBucket(signalQuality)
                 };
 
                 optimizationBuffer.Enqueue(opt);
-                if (optimizationBuffer.Count >= 10) // Smaller buffer for optimization data
+                if (optimizationBuffer.Count >= 10)
                     FlushOptimizationBuffer();
             }
             catch (Exception ex)
             {
-                Print($"Optimization logging error: {ex.Message}");
+                Print($"Enhanced optimization logging error: {ex.Message}");
             }
+        }
+
+        // Helper function for quality score bucketing
+        private string GetQualityBucket(int score)
+        {
+            if (score >= 81) return "81-100";
+            if (score >= 61) return "61-80";
+            if (score >= 41) return "41-60";
+            if (score >= 21) return "21-40";
+            return "0-20";
         }
 
         private void EnsurePerformanceLogFile()
@@ -776,14 +803,14 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
 		    }
 		}
 
+        // Updated optimization header for streamlined CSV (19 fields total)
         private void WriteOptimizationHeader()
         {
             if (optimizationHeaderWritten || string.IsNullOrEmpty(optimizationLogFile)) return;
 
-            // Only write header if enabled
             if (!WriteCSVHeaders) 
             {
-                optimizationHeaderWritten = true; // Mark as written to prevent future attempts
+                optimizationHeaderWritten = true;
                 return;
             }
 
@@ -792,17 +819,21 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                 using (StreamWriter writer = new StreamWriter(optimizationLogFile, false))
                 {
                     writer.WriteLine(
-                        "MACD_Value,MACD_Signal,MACD_Rising,ADX_Value,DI_Plus,DI_Minus,DI_Spread," +
-                        "Price_vs_EMA,Volume_Ratio,Condition1,Condition2,Condition3,Condition4,Condition5,Condition6," +
-                        "Signal_Quality_Score,Option2_Exit_Used,Failed_Within_3_Bars," +
-                        "Trade_Event,Market_Regime,ATR_Value,Signal_Duration_Bars,Conditions_Met_Count"
+                        // Core Technical (6 fields)
+                        "MACD_Value,MACD_Signal,MACD_Rising,ADX_Value,DI_Spread,Volume_Ratio," +
+                        // Condition Tracking (6 fields)
+                        "Condition1,Condition2,Condition3,Condition4,Condition5,Condition6," +
+                        // Performance & Classification (4 fields)
+                        "Signal_Quality_Score,Failed_Within_3_Bars,Trade_Event,Market_Regime," +
+                        // NEW Filter Fields (3 fields)
+                        "Signal_Accepted,Filter_Threshold,Quality_Score_Bucket"
                     );
                 }
                 optimizationHeaderWritten = true;
             }
             catch (Exception ex)
             {
-                Print($"Error writing optimization header: {ex.Message}");
+                Print($"Error writing enhanced optimization header: {ex.Message}");
             }
         }
 
@@ -864,14 +895,19 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
 		           $"{trade.TradeDurationMinutes:F1},{trade.EntryHour},{trade.ExitHour},{trade.SignalStrengthScore},{trade.ExitReason}";
 		}
 
+        // Updated format function for streamlined optimization events (19 fields)
         private string FormatOptimizationEvent(OptimizationEvent opt)
         {
-            return $"{opt.MacdValue:F4},{opt.MacdSignal:F4},{opt.MacdRising}," +
-                   $"{opt.AdxValue:F2},{opt.DiPlus:F2},{opt.DiMinus:F2},{opt.DiSpread:F2}," +
-                   $"{opt.PriceVsEma:F2},{opt.VolumeRatio:F2}," +
-                   $"{opt.Condition1},{opt.Condition2},{opt.Condition3},{opt.Condition4},{opt.Condition5},{opt.Condition6}," +
-                   $"{opt.SignalQualityScore},{opt.Option2ExitUsed},{opt.FailedWithin3Bars}," +
-                   $"{opt.TradeEvent},{opt.MarketRegime},{opt.AtrValue:F2},{opt.SignalDurationBars},{opt.ConditionsMetCount}";
+            return 
+                // Core Technical (6 fields)
+                $"{opt.MacdValue:F4},{opt.MacdSignal:F4},{opt.MacdRising}," +
+                $"{opt.AdxValue:F2},{opt.DiSpread:F2},{opt.VolumeRatio:F2}," +
+                // Condition Tracking (6 fields)
+                $"{opt.Condition1},{opt.Condition2},{opt.Condition3},{opt.Condition4},{opt.Condition5},{opt.Condition6}," +
+                // Performance & Classification (4 fields)
+                $"{opt.SignalQualityScore},{opt.FailedWithin3Bars},{opt.TradeEvent},{opt.MarketRegime}," +
+                // NEW Filter Fields (3 fields)
+                $"{opt.Signal_Accepted},{opt.Filter_Threshold},{opt.Quality_Score_Bucket}";
         }
 
         #endregion
@@ -1082,7 +1118,7 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
             return baseBrush;
         }
 
-        #region Data Structures
+        #region STREAMLINED DATA STRUCTURES
 
         private class TradeEvent
         {
@@ -1105,34 +1141,48 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
             public bool IsEntry;
         }
 
+        // STREAMLINED OptimizationEvent class (removed 7 fields, added 3 filter fields)
         private class OptimizationEvent
         {
+            // Core Technical Indicators (6 fields) - kept MACD_Value, MACD_Signal, MACD_Rising, ADX_Value, DI_Spread, Volume_Ratio
             public double MacdValue;
             public double MacdSignal;
             public bool MacdRising;
             public double AdxValue;
-            public double DiPlus;
-            public double DiMinus;
-            public double DiSpread;
-            public double PriceVsEma;
+            public double DiSpread;              // KEPT: More useful than individual DI+ and DI-
             public double VolumeRatio;
+            
+            // Condition Tracking (6 fields) - ALL KEPT as critical
             public bool Condition1;
             public bool Condition2;
             public bool Condition3;
             public bool Condition4;
             public bool Condition5;
             public bool Condition6;
+            
+            // Performance & Classification (4 fields) - kept Signal_Quality_Score, Failed_Within_3_Bars, Trade_Event, Market_Regime
             public int SignalQualityScore;
-            public bool Option2ExitUsed;
             public bool FailedWithin3Bars;
             public string TradeEvent;
             public string MarketRegime;
-            public double AtrValue;
-            public int SignalDurationBars;
-            public int ConditionsMetCount;
+            
+            // NEW: Signal Quality Filter Fields (3 fields)
+            public bool Signal_Accepted;
+            public int Filter_Threshold;
+            public string Quality_Score_Bucket;
+            
+            // REMOVED FIELDS (7 total):
+            // - ATR_Value (Market_Regime provides better context)
+            // - Signal_Duration_Bars (limited optimization value)
+            // - Conditions_Met_Count (redundant - can count Condition1-6)
+            // - DI_Plus (DI_Spread more useful)
+            // - DI_Minus (DI_Spread more useful)  
+            // - Option2_Exit_Used (manual trading - irrelevant)
+            // - Price_vs_EMA (no EMA optimization planned)
         }
 
         #endregion
+
         #region Properties
 
         [NinjaScriptProperty]
@@ -1301,6 +1351,16 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
 		[Display(Name = "Trading End Time", Order = 5, GroupName = "Data Tracking Settings")]
 		public TimeSpan TradingEndTime { get; set; }
 
+        // Signal Quality Filter Properties
+        [NinjaScriptProperty]
+        [Display(Name = "Enable Signal Quality Filter", Order = 6, GroupName = "Data Tracking Settings")]
+        public bool EnableSignalQualityFilter { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(20, 80)]
+        [Display(Name = "Signal Quality Threshold", Order = 7, GroupName = "Data Tracking Settings")]
+        public int SignalQualityThreshold { get; set; }
+
         #endregion
     }
 }
@@ -1312,18 +1372,18 @@ namespace NinjaTrader.NinjaScript.Indicators
 	public partial class Indicator : NinjaTrader.Gui.NinjaScript.IndicatorRenderBase
 	{
 		private Myindicators.TrendSpotter[] cacheTrendSpotter;
-		public Myindicators.TrendSpotter TrendSpotter(int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, double minAdxThreshold, int emaPeriod, double volumeFilterMultiplier, bool showEntrySignals, bool showExitSignals, bool showPartialSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialLongSignalColor, Brush partialShortSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enablePerformanceTracking, bool enableOptimizationTracking, bool writeCSVHeaders, TimeSpan tradingStartTime, TimeSpan tradingEndTime)
+		public Myindicators.TrendSpotter TrendSpotter(int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, double minAdxThreshold, int emaPeriod, double volumeFilterMultiplier, bool showEntrySignals, bool showExitSignals, bool showPartialSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialLongSignalColor, Brush partialShortSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enablePerformanceTracking, bool enableOptimizationTracking, bool writeCSVHeaders, TimeSpan tradingStartTime, TimeSpan tradingEndTime, bool enableSignalQualityFilter, int signalQualityThreshold)
 		{
-			return TrendSpotter(Input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, minAdxThreshold, emaPeriod, volumeFilterMultiplier, showEntrySignals, showExitSignals, showPartialSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialLongSignalColor, partialShortSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor, enablePerformanceTracking, enableOptimizationTracking, writeCSVHeaders, tradingStartTime, tradingEndTime);
+			return TrendSpotter(Input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, minAdxThreshold, emaPeriod, volumeFilterMultiplier, showEntrySignals, showExitSignals, showPartialSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialLongSignalColor, partialShortSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor, enablePerformanceTracking, enableOptimizationTracking, writeCSVHeaders, tradingStartTime, tradingEndTime, enableSignalQualityFilter, signalQualityThreshold);
 		}
 
-		public Myindicators.TrendSpotter TrendSpotter(ISeries<double> input, int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, double minAdxThreshold, int emaPeriod, double volumeFilterMultiplier, bool showEntrySignals, bool showExitSignals, bool showPartialSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialLongSignalColor, Brush partialShortSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enablePerformanceTracking, bool enableOptimizationTracking, bool writeCSVHeaders, TimeSpan tradingStartTime, TimeSpan tradingEndTime)
+		public Myindicators.TrendSpotter TrendSpotter(ISeries<double> input, int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, double minAdxThreshold, int emaPeriod, double volumeFilterMultiplier, bool showEntrySignals, bool showExitSignals, bool showPartialSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialLongSignalColor, Brush partialShortSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enablePerformanceTracking, bool enableOptimizationTracking, bool writeCSVHeaders, TimeSpan tradingStartTime, TimeSpan tradingEndTime, bool enableSignalQualityFilter, int signalQualityThreshold)
 		{
 			if (cacheTrendSpotter != null)
 				for (int idx = 0; idx < cacheTrendSpotter.Length; idx++)
-					if (cacheTrendSpotter[idx] != null && cacheTrendSpotter[idx].MacdFast == macdFast && cacheTrendSpotter[idx].MacdSlow == macdSlow && cacheTrendSpotter[idx].MacdSmooth == macdSmooth && cacheTrendSpotter[idx].MacdMAType == macdMAType && cacheTrendSpotter[idx].DmPeriod == dmPeriod && cacheTrendSpotter[idx].AdxRisingBars == adxRisingBars && cacheTrendSpotter[idx].MinAdxThreshold == minAdxThreshold && cacheTrendSpotter[idx].EmaPeriod == emaPeriod && cacheTrendSpotter[idx].VolumeFilterMultiplier == volumeFilterMultiplier && cacheTrendSpotter[idx].ShowEntrySignals == showEntrySignals && cacheTrendSpotter[idx].ShowExitSignals == showExitSignals && cacheTrendSpotter[idx].ShowPartialSignals == showPartialSignals && cacheTrendSpotter[idx].Signal_Offset == signal_Offset && cacheTrendSpotter[idx].LongOn == longOn && cacheTrendSpotter[idx].ShortOn == shortOn && cacheTrendSpotter[idx].LongOff == longOff && cacheTrendSpotter[idx].ShortOff == shortOff && cacheTrendSpotter[idx].PartialLongSignalColor == partialLongSignalColor && cacheTrendSpotter[idx].PartialShortSignalColor == partialShortSignalColor && cacheTrendSpotter[idx].PartialSignalOpacity == partialSignalOpacity && cacheTrendSpotter[idx].LongEntryColor == longEntryColor && cacheTrendSpotter[idx].ShortEntryColor == shortEntryColor && cacheTrendSpotter[idx].ExitColor == exitColor && cacheTrendSpotter[idx].EnablePerformanceTracking == enablePerformanceTracking && cacheTrendSpotter[idx].EnableOptimizationTracking == enableOptimizationTracking && cacheTrendSpotter[idx].WriteCSVHeaders == writeCSVHeaders && cacheTrendSpotter[idx].TradingStartTime == tradingStartTime && cacheTrendSpotter[idx].TradingEndTime == tradingEndTime && cacheTrendSpotter[idx].EqualsInput(input))
+					if (cacheTrendSpotter[idx] != null && cacheTrendSpotter[idx].MacdFast == macdFast && cacheTrendSpotter[idx].MacdSlow == macdSlow && cacheTrendSpotter[idx].MacdSmooth == macdSmooth && cacheTrendSpotter[idx].MacdMAType == macdMAType && cacheTrendSpotter[idx].DmPeriod == dmPeriod && cacheTrendSpotter[idx].AdxRisingBars == adxRisingBars && cacheTrendSpotter[idx].MinAdxThreshold == minAdxThreshold && cacheTrendSpotter[idx].EmaPeriod == emaPeriod && cacheTrendSpotter[idx].VolumeFilterMultiplier == volumeFilterMultiplier && cacheTrendSpotter[idx].ShowEntrySignals == showEntrySignals && cacheTrendSpotter[idx].ShowExitSignals == showExitSignals && cacheTrendSpotter[idx].ShowPartialSignals == showPartialSignals && cacheTrendSpotter[idx].Signal_Offset == signal_Offset && cacheTrendSpotter[idx].LongOn == longOn && cacheTrendSpotter[idx].ShortOn == shortOn && cacheTrendSpotter[idx].LongOff == longOff && cacheTrendSpotter[idx].ShortOff == shortOff && cacheTrendSpotter[idx].PartialLongSignalColor == partialLongSignalColor && cacheTrendSpotter[idx].PartialShortSignalColor == partialShortSignalColor && cacheTrendSpotter[idx].PartialSignalOpacity == partialSignalOpacity && cacheTrendSpotter[idx].LongEntryColor == longEntryColor && cacheTrendSpotter[idx].ShortEntryColor == shortEntryColor && cacheTrendSpotter[idx].ExitColor == exitColor && cacheTrendSpotter[idx].EnablePerformanceTracking == enablePerformanceTracking && cacheTrendSpotter[idx].EnableOptimizationTracking == enableOptimizationTracking && cacheTrendSpotter[idx].WriteCSVHeaders == writeCSVHeaders && cacheTrendSpotter[idx].TradingStartTime == tradingStartTime && cacheTrendSpotter[idx].TradingEndTime == tradingEndTime && cacheTrendSpotter[idx].EnableSignalQualityFilter == enableSignalQualityFilter && cacheTrendSpotter[idx].SignalQualityThreshold == signalQualityThreshold && cacheTrendSpotter[idx].EqualsInput(input))
 						return cacheTrendSpotter[idx];
-			return CacheIndicator<Myindicators.TrendSpotter>(new Myindicators.TrendSpotter(){ MacdFast = macdFast, MacdSlow = macdSlow, MacdSmooth = macdSmooth, MacdMAType = macdMAType, DmPeriod = dmPeriod, AdxRisingBars = adxRisingBars, MinAdxThreshold = minAdxThreshold, EmaPeriod = emaPeriod, VolumeFilterMultiplier = volumeFilterMultiplier, ShowEntrySignals = showEntrySignals, ShowExitSignals = showExitSignals, ShowPartialSignals = showPartialSignals, Signal_Offset = signal_Offset, LongOn = longOn, ShortOn = shortOn, LongOff = longOff, ShortOff = shortOff, PartialLongSignalColor = partialLongSignalColor, PartialShortSignalColor = partialShortSignalColor, PartialSignalOpacity = partialSignalOpacity, LongEntryColor = longEntryColor, ShortEntryColor = shortEntryColor, ExitColor = exitColor, EnablePerformanceTracking = enablePerformanceTracking, EnableOptimizationTracking = enableOptimizationTracking, WriteCSVHeaders = writeCSVHeaders, TradingStartTime = tradingStartTime, TradingEndTime = tradingEndTime }, input, ref cacheTrendSpotter);
+			return CacheIndicator<Myindicators.TrendSpotter>(new Myindicators.TrendSpotter(){ MacdFast = macdFast, MacdSlow = macdSlow, MacdSmooth = macdSmooth, MacdMAType = macdMAType, DmPeriod = dmPeriod, AdxRisingBars = adxRisingBars, MinAdxThreshold = minAdxThreshold, EmaPeriod = emaPeriod, VolumeFilterMultiplier = volumeFilterMultiplier, ShowEntrySignals = showEntrySignals, ShowExitSignals = showExitSignals, ShowPartialSignals = showPartialSignals, Signal_Offset = signal_Offset, LongOn = longOn, ShortOn = shortOn, LongOff = longOff, ShortOff = shortOff, PartialLongSignalColor = partialLongSignalColor, PartialShortSignalColor = partialShortSignalColor, PartialSignalOpacity = partialSignalOpacity, LongEntryColor = longEntryColor, ShortEntryColor = shortEntryColor, ExitColor = exitColor, EnablePerformanceTracking = enablePerformanceTracking, EnableOptimizationTracking = enableOptimizationTracking, WriteCSVHeaders = writeCSVHeaders, TradingStartTime = tradingStartTime, TradingEndTime = tradingEndTime, EnableSignalQualityFilter = enableSignalQualityFilter, SignalQualityThreshold = signalQualityThreshold }, input, ref cacheTrendSpotter);
 		}
 	}
 }
@@ -1332,14 +1392,14 @@ namespace NinjaTrader.NinjaScript.MarketAnalyzerColumns
 {
 	public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
 	{
-		public Indicators.Myindicators.TrendSpotter TrendSpotter(int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, double minAdxThreshold, int emaPeriod, double volumeFilterMultiplier, bool showEntrySignals, bool showExitSignals, bool showPartialSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialLongSignalColor, Brush partialShortSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enablePerformanceTracking, bool enableOptimizationTracking, bool writeCSVHeaders, TimeSpan tradingStartTime, TimeSpan tradingEndTime)
+		public Indicators.Myindicators.TrendSpotter TrendSpotter(int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, double minAdxThreshold, int emaPeriod, double volumeFilterMultiplier, bool showEntrySignals, bool showExitSignals, bool showPartialSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialLongSignalColor, Brush partialShortSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enablePerformanceTracking, bool enableOptimizationTracking, bool writeCSVHeaders, TimeSpan tradingStartTime, TimeSpan tradingEndTime, bool enableSignalQualityFilter, int signalQualityThreshold)
 		{
-			return indicator.TrendSpotter(Input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, minAdxThreshold, emaPeriod, volumeFilterMultiplier, showEntrySignals, showExitSignals, showPartialSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialLongSignalColor, partialShortSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor, enablePerformanceTracking, enableOptimizationTracking, writeCSVHeaders, tradingStartTime, tradingEndTime);
+			return indicator.TrendSpotter(Input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, minAdxThreshold, emaPeriod, volumeFilterMultiplier, showEntrySignals, showExitSignals, showPartialSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialLongSignalColor, partialShortSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor, enablePerformanceTracking, enableOptimizationTracking, writeCSVHeaders, tradingStartTime, tradingEndTime, enableSignalQualityFilter, signalQualityThreshold);
 		}
 
-		public Indicators.Myindicators.TrendSpotter TrendSpotter(ISeries<double> input , int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, double minAdxThreshold, int emaPeriod, double volumeFilterMultiplier, bool showEntrySignals, bool showExitSignals, bool showPartialSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialLongSignalColor, Brush partialShortSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enablePerformanceTracking, bool enableOptimizationTracking, bool writeCSVHeaders, TimeSpan tradingStartTime, TimeSpan tradingEndTime)
+		public Indicators.Myindicators.TrendSpotter TrendSpotter(ISeries<double> input , int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, double minAdxThreshold, int emaPeriod, double volumeFilterMultiplier, bool showEntrySignals, bool showExitSignals, bool showPartialSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialLongSignalColor, Brush partialShortSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enablePerformanceTracking, bool enableOptimizationTracking, bool writeCSVHeaders, TimeSpan tradingStartTime, TimeSpan tradingEndTime, bool enableSignalQualityFilter, int signalQualityThreshold)
 		{
-			return indicator.TrendSpotter(input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, minAdxThreshold, emaPeriod, volumeFilterMultiplier, showEntrySignals, showExitSignals, showPartialSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialLongSignalColor, partialShortSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor, enablePerformanceTracking, enableOptimizationTracking, writeCSVHeaders, tradingStartTime, tradingEndTime);
+			return indicator.TrendSpotter(input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, minAdxThreshold, emaPeriod, volumeFilterMultiplier, showEntrySignals, showExitSignals, showPartialSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialLongSignalColor, partialShortSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor, enablePerformanceTracking, enableOptimizationTracking, writeCSVHeaders, tradingStartTime, tradingEndTime, enableSignalQualityFilter, signalQualityThreshold);
 		}
 	}
 }
@@ -1348,14 +1408,14 @@ namespace NinjaTrader.NinjaScript.Strategies
 {
 	public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
 	{
-		public Indicators.Myindicators.TrendSpotter TrendSpotter(int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, double minAdxThreshold, int emaPeriod, double volumeFilterMultiplier, bool showEntrySignals, bool showExitSignals, bool showPartialSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialLongSignalColor, Brush partialShortSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enablePerformanceTracking, bool enableOptimizationTracking, bool writeCSVHeaders, TimeSpan tradingStartTime, TimeSpan tradingEndTime)
+		public Indicators.Myindicators.TrendSpotter TrendSpotter(int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, double minAdxThreshold, int emaPeriod, double volumeFilterMultiplier, bool showEntrySignals, bool showExitSignals, bool showPartialSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialLongSignalColor, Brush partialShortSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enablePerformanceTracking, bool enableOptimizationTracking, bool writeCSVHeaders, TimeSpan tradingStartTime, TimeSpan tradingEndTime, bool enableSignalQualityFilter, int signalQualityThreshold)
 		{
-			return indicator.TrendSpotter(Input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, minAdxThreshold, emaPeriod, volumeFilterMultiplier, showEntrySignals, showExitSignals, showPartialSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialLongSignalColor, partialShortSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor, enablePerformanceTracking, enableOptimizationTracking, writeCSVHeaders, tradingStartTime, tradingEndTime);
+			return indicator.TrendSpotter(Input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, minAdxThreshold, emaPeriod, volumeFilterMultiplier, showEntrySignals, showExitSignals, showPartialSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialLongSignalColor, partialShortSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor, enablePerformanceTracking, enableOptimizationTracking, writeCSVHeaders, tradingStartTime, tradingEndTime, enableSignalQualityFilter, signalQualityThreshold);
 		}
 
-		public Indicators.Myindicators.TrendSpotter TrendSpotter(ISeries<double> input , int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, double minAdxThreshold, int emaPeriod, double volumeFilterMultiplier, bool showEntrySignals, bool showExitSignals, bool showPartialSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialLongSignalColor, Brush partialShortSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enablePerformanceTracking, bool enableOptimizationTracking, bool writeCSVHeaders, TimeSpan tradingStartTime, TimeSpan tradingEndTime)
+		public Indicators.Myindicators.TrendSpotter TrendSpotter(ISeries<double> input , int macdFast, int macdSlow, int macdSmooth, CustomEnumNamespace.UniversalMovingAverage macdMAType, int dmPeriod, int adxRisingBars, double minAdxThreshold, int emaPeriod, double volumeFilterMultiplier, bool showEntrySignals, bool showExitSignals, bool showPartialSignals, double signal_Offset, string longOn, string shortOn, string longOff, string shortOff, Brush partialLongSignalColor, Brush partialShortSignalColor, int partialSignalOpacity, Brush longEntryColor, Brush shortEntryColor, Brush exitColor, bool enablePerformanceTracking, bool enableOptimizationTracking, bool writeCSVHeaders, TimeSpan tradingStartTime, TimeSpan tradingEndTime, bool enableSignalQualityFilter, int signalQualityThreshold)
 		{
-			return indicator.TrendSpotter(input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, minAdxThreshold, emaPeriod, volumeFilterMultiplier, showEntrySignals, showExitSignals, showPartialSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialLongSignalColor, partialShortSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor, enablePerformanceTracking, enableOptimizationTracking, writeCSVHeaders, tradingStartTime, tradingEndTime);
+			return indicator.TrendSpotter(input, macdFast, macdSlow, macdSmooth, macdMAType, dmPeriod, adxRisingBars, minAdxThreshold, emaPeriod, volumeFilterMultiplier, showEntrySignals, showExitSignals, showPartialSignals, signal_Offset, longOn, shortOn, longOff, shortOff, partialLongSignalColor, partialShortSignalColor, partialSignalOpacity, longEntryColor, shortEntryColor, exitColor, enablePerformanceTracking, enableOptimizationTracking, writeCSVHeaders, tradingStartTime, tradingEndTime, enableSignalQualityFilter, signalQualityThreshold);
 		}
 	}
 }
