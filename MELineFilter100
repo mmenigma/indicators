@@ -28,7 +28,7 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
         {
             if (State == State.SetDefaults)
             {
-                Description = @"Market Energy signals filtered by line threshold and angle";
+                Description = @"Market Energy signals filtered by line threshold only";
                 Name = "MELineFilter";
                 Calculate = Calculate.OnBarClose;
                 IsOverlay = true;
@@ -40,8 +40,8 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                 
                 // Signal quality filters
                 ThresholdLevel = 100.0;
-                MinimumAngle = 45.0;
-                AngleBars = 3;
+                MinimumAngle = 45.0;  // Kept for future use
+                AngleBars = 3;        // Kept for future use
                 
                 // Signal settings (using MTFEnergySignals pattern)
                 ShowEntrySignals = true;
@@ -63,17 +63,18 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
 
         protected override void OnBarUpdate()
         {
-            if (CurrentBar < Math.Max(AngleBars, 10))
+            if (CurrentBar < 10)
                 return;
 
             // Determine current cross state
             int newState = GetCrossState();
             
-            // Check if state changed (reset condition)
+            // Handle state changes
             if (newState != currentState)
             {
                 currentState = newState;
                 hasSignaledInState = false; // Reset signal flag for new state
+                // Continue processing - don't exit on state changes
             }
             
             // Only check for signals if we're in a crossed state and haven't signaled yet
@@ -92,7 +93,7 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                             signalCount++;
                             Draw.ArrowUp(this, LongOn + signalCount.ToString(), true, 0, 
                                        Low[0] - SignalOffset * TickSize, LongEntryColor);
-                            hasSignaledInState = true; // Mark that we've signaled in this state
+                            hasSignaledInState = true;
                         }
                         // Draw bearish signal on bear bars
                         else if (currentState == -1 && !isBullBar)
@@ -100,7 +101,7 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
                             signalCount++;
                             Draw.ArrowDown(this, ShortOn + signalCount.ToString(), true, 0, 
                                          High[0] + SignalOffset * TickSize, ShortEntryColor);
-                            hasSignaledInState = true; // Mark that we've signaled in this state
+                            hasSignaledInState = true;
                         }
                     }
                 }
@@ -131,25 +132,18 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
         {
             try
             {
-                bool thresholdMet = false;
-                
                 if (currentState == 1) // Bullish state - check green line
                 {
                     double currentUp = meIndicator.Up[0];
-                    
-                    // Check threshold rule only (angle rule disabled for now)
-                    thresholdMet = currentUp >= ThresholdLevel;
+                    return currentUp >= ThresholdLevel; // Only threshold rule
                 }
                 else if (currentState == -1) // Bearish state - check red line
                 {
                     double currentDn = meIndicator.Dn[0];
-                    
-                    // Check threshold rule only (angle rule disabled for now)
-                    thresholdMet = currentDn >= ThresholdLevel;
+                    return currentDn >= ThresholdLevel; // Only threshold rule
                 }
                 
-                // Signal is valid if threshold condition is met
-                return thresholdMet;
+                return false;
             }
             catch
             {
@@ -166,12 +160,12 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
 
         [NinjaScriptProperty]
         [Range(15.0, 90.0)]
-        [Display(Name = "Minimum Angle", Description = "Minimum winning line angle in degrees", Order = 2, GroupName = "Quality Filters")]
+        [Display(Name = "Minimum Angle", Description = "Minimum winning line angle in degrees (future use)", Order = 2, GroupName = "Quality Filters")]
         public double MinimumAngle { get; set; }
 
         [NinjaScriptProperty]
         [Range(2, 5)]
-        [Display(Name = "Angle Calculation Bars", Description = "Number of bars to calculate angle", Order = 3, GroupName = "Quality Filters")]
+        [Display(Name = "Angle Calculation Bars", Description = "Number of bars to calculate angle (future use)", Order = 3, GroupName = "Quality Filters")]
         public int AngleBars { get; set; }
 
         [NinjaScriptProperty]
@@ -228,60 +222,3 @@ namespace NinjaTrader.NinjaScript.Indicators.Myindicators
         #endregion
     }
 }
-
-#region NinjaScript generated code. Neither change nor remove.
-
-namespace NinjaTrader.NinjaScript.Indicators
-{
-	public partial class Indicator : NinjaTrader.Gui.NinjaScript.IndicatorRenderBase
-	{
-		private Myindicators.MELineFilter[] cacheMELineFilter;
-		public Myindicators.MELineFilter MELineFilter(double thresholdLevel, double minimumAngle, int angleBars, bool showEntrySignals, string longOn, Brush longEntryColor, string shortOn, Brush shortEntryColor, double signalOffset, int mELookback, int mEThreshold)
-		{
-			return MELineFilter(Input, thresholdLevel, minimumAngle, angleBars, showEntrySignals, longOn, longEntryColor, shortOn, shortEntryColor, signalOffset, mELookback, mEThreshold);
-		}
-
-		public Myindicators.MELineFilter MELineFilter(ISeries<double> input, double thresholdLevel, double minimumAngle, int angleBars, bool showEntrySignals, string longOn, Brush longEntryColor, string shortOn, Brush shortEntryColor, double signalOffset, int mELookback, int mEThreshold)
-		{
-			if (cacheMELineFilter != null)
-				for (int idx = 0; idx < cacheMELineFilter.Length; idx++)
-					if (cacheMELineFilter[idx] != null && cacheMELineFilter[idx].ThresholdLevel == thresholdLevel && cacheMELineFilter[idx].MinimumAngle == minimumAngle && cacheMELineFilter[idx].AngleBars == angleBars && cacheMELineFilter[idx].ShowEntrySignals == showEntrySignals && cacheMELineFilter[idx].LongOn == longOn && cacheMELineFilter[idx].LongEntryColor == longEntryColor && cacheMELineFilter[idx].ShortOn == shortOn && cacheMELineFilter[idx].ShortEntryColor == shortEntryColor && cacheMELineFilter[idx].SignalOffset == signalOffset && cacheMELineFilter[idx].MELookback == mELookback && cacheMELineFilter[idx].METhreshold == mEThreshold && cacheMELineFilter[idx].EqualsInput(input))
-						return cacheMELineFilter[idx];
-			return CacheIndicator<Myindicators.MELineFilter>(new Myindicators.MELineFilter(){ ThresholdLevel = thresholdLevel, MinimumAngle = minimumAngle, AngleBars = angleBars, ShowEntrySignals = showEntrySignals, LongOn = longOn, LongEntryColor = longEntryColor, ShortOn = shortOn, ShortEntryColor = shortEntryColor, SignalOffset = signalOffset, MELookback = mELookback, METhreshold = mEThreshold }, input, ref cacheMELineFilter);
-		}
-	}
-}
-
-namespace NinjaTrader.NinjaScript.MarketAnalyzerColumns
-{
-	public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
-	{
-		public Indicators.Myindicators.MELineFilter MELineFilter(double thresholdLevel, double minimumAngle, int angleBars, bool showEntrySignals, string longOn, Brush longEntryColor, string shortOn, Brush shortEntryColor, double signalOffset, int mELookback, int mEThreshold)
-		{
-			return indicator.MELineFilter(Input, thresholdLevel, minimumAngle, angleBars, showEntrySignals, longOn, longEntryColor, shortOn, shortEntryColor, signalOffset, mELookback, mEThreshold);
-		}
-
-		public Indicators.Myindicators.MELineFilter MELineFilter(ISeries<double> input , double thresholdLevel, double minimumAngle, int angleBars, bool showEntrySignals, string longOn, Brush longEntryColor, string shortOn, Brush shortEntryColor, double signalOffset, int mELookback, int mEThreshold)
-		{
-			return indicator.MELineFilter(input, thresholdLevel, minimumAngle, angleBars, showEntrySignals, longOn, longEntryColor, shortOn, shortEntryColor, signalOffset, mELookback, mEThreshold);
-		}
-	}
-}
-
-namespace NinjaTrader.NinjaScript.Strategies
-{
-	public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
-	{
-		public Indicators.Myindicators.MELineFilter MELineFilter(double thresholdLevel, double minimumAngle, int angleBars, bool showEntrySignals, string longOn, Brush longEntryColor, string shortOn, Brush shortEntryColor, double signalOffset, int mELookback, int mEThreshold)
-		{
-			return indicator.MELineFilter(Input, thresholdLevel, minimumAngle, angleBars, showEntrySignals, longOn, longEntryColor, shortOn, shortEntryColor, signalOffset, mELookback, mEThreshold);
-		}
-
-		public Indicators.Myindicators.MELineFilter MELineFilter(ISeries<double> input , double thresholdLevel, double minimumAngle, int angleBars, bool showEntrySignals, string longOn, Brush longEntryColor, string shortOn, Brush shortEntryColor, double signalOffset, int mELookback, int mEThreshold)
-		{
-			return indicator.MELineFilter(input, thresholdLevel, minimumAngle, angleBars, showEntrySignals, longOn, longEntryColor, shortOn, shortEntryColor, signalOffset, mELookback, mEThreshold);
-		}
-	}
-}
-
-#endregion
