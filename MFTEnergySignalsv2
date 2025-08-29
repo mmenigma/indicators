@@ -1,0 +1,381 @@
+#region Using declarations
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Xml.Serialization;
+using NinjaTrader.Cbi;
+using NinjaTrader.Gui;
+using NinjaTrader.Gui.Chart;
+using NinjaTrader.Gui.SuperDom;
+using NinjaTrader.Data;
+using NinjaTrader.NinjaScript;
+using NinjaTrader.Core.FloatingPoint;
+using NinjaTrader.NinjaScript.DrawingTools;
+
+using EnumType = NinjaTrader.NinjaScript.Indicators.TOP_Market_Energy_BuyingSelling.EnumType;
+#endregion
+
+namespace NinjaTrader.NinjaScript.Indicators.Myindicators
+{
+    public class MTFEnergySignalsv2 : Indicator
+    {
+        private TOP_Market_Energy_BuyingSelling meIndicator1;
+        private TOP_Market_Energy_BuyingSelling meIndicator2;
+        
+        private double lastME1Signal = 0;
+        private double lastME2Signal = 0;
+        private double lastConfluenceSignal = 0;
+        
+        // Trade tracking variables
+        private bool inLongTrade = false;
+        private bool inShortTrade = false;
+
+        protected override void OnStateChange()
+        {
+            if (State == State.SetDefaults)
+            {
+                Description = "Dual Market Energy Indicators with Confluence Signals";
+                Name = "MTFEnergySignalsv2";
+                IsSuspendedWhileInactive = true;
+                IsOverlay = true;
+                Calculate = Calculate.OnBarClose;
+                
+                // Default signal settings
+                ShowEntrySignals = false;
+                LongOn = "LongEntry";
+                ShortOn = "ShortEntry";
+                
+                ShowExitSignals = false;
+                LongOff = "LongExit";
+                ShortOff = "ShortExit";
+                
+                Signal_Offset = 5;
+                
+                // Signal Colors
+                LongEntryColor = Brushes.Blue;
+                ShortEntryColor = Brushes.Yellow;
+                ExitColor = Brushes.DimGray;
+                
+                // Signal Filters
+                MinThreshold = 60;
+                MinSeparation = 20;
+                
+                // First ME Indicator settings
+                ME1Lookback = 5;
+                ME1Threshold = 100;
+                ME1EnumType = EnumType.One;
+                
+                // Second ME Indicator settings
+                ME2Lookback = 50;
+                ME2Threshold = 200;
+                ME2EnumType = EnumType.One;
+            }
+            else if (State == State.DataLoaded)
+            {
+                meIndicator1 = TOP_Market_Energy_BuyingSelling(Input, ME1EnumType, ME1Lookback, ME1Threshold);
+                meIndicator2 = TOP_Market_Energy_BuyingSelling(Input, ME2EnumType, ME2Lookback, ME2Threshold);
+            }
+        }
+
+        public override string DisplayName
+        {
+            get
+            {
+                return Name + "(" + ME1Lookback + "/" + ME1Threshold + " + " + ME2Lookback + "/" + ME2Threshold + ")";
+            }
+        }
+
+        protected override void OnBarUpdate()
+        {
+            // Ensure we have enough bars for both indicators
+            if (CurrentBar < Math.Max(ME1Threshold, ME2Threshold) + 1)
+                return;
+
+            // Get current signals from both indicators
+            double currentME1Signal = GetEnergySignal(meIndicator1, lastME1Signal);
+            double currentME2Signal = GetEnergySignal(meIndicator2, lastME2Signal);
+            
+            // Update last signals
+            lastME1Signal = currentME1Signal;
+            lastME2Signal = currentME2Signal;
+            
+            ProcessSignals(currentME1Signal, currentME2Signal);
+        }
+
+        private double GetEnergySignal(TOP_Market_Energy_BuyingSelling indicator, double lastSignal)
+        {
+            try
+            {
+                double upValue = indicator.Up[0];
+                double dnValue = indicator.Dn[0];
+                double upValuePrev = indicator.Up[1];
+                double dnValuePrev = indicator.Dn[1];
+                
+                bool upCrossedAbove = (upValuePrev <= dnValuePrev) && (upValue > dnValue);
+                bool dnCrossedAbove = (dnValuePrev <= upValuePrev) && (dnValue > upValue);
+                
+                if (upCrossedAbove)
+                    return 1;
+                else if (dnCrossedAbove)
+                    return -1;
+                
+                return lastSignal;
+            }
+            catch
+            {
+                return lastSignal;
+            }
+        }
+
+        private bool ValidateIndicator(TOP_Market_Energy_BuyingSelling indicator)
+        {
+            try
+            {
+                double upValue = indicator.Up[0];
+                double dnValue = indicator.Dn[0];
+                
+                // Check if the winning line is above threshold
+                double winningValue = Math.Max(upValue, dnValue);
+                if (winningValue < MinThreshold)
+                    return false;
+                
+                // Check if separation between lines is sufficient
+                double separation = Math.Abs(upValue - dnValue);
+                if (separation < MinSeparation)
+                    return false;
+                
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private bool IsTrendContinuingUp()
+        {
+            // Simple trend continuation check - last 3 bars should show upward bias
+            if (CurrentBar < 3) return false;
+            
+            try
+            {
+                // Check if we're making higher lows or closes are generally trending up
+                return (Low[0] >= Low[1] || Close[0] > Close[2]) && Close[0] > Open[0];
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private bool IsTrendContinuingDown()
+        {
+            // Simple trend continuation check - last 3 bars should show downward bias
+            if (CurrentBar < 3) return false;
+            
+            try
+            {
+                // Check if we're making lower highs or closes are generally trending down
+                return (High[0] <= High[1] || Close[0] < Close[2]) && Close[0] < Open[0];
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private void ProcessSignals(double me1Signal, double me2Signal)
+        {
+            // Check for exit conditions first (renko bar direction change)
+            if (inLongTrade && Close[0] < Open[0]) // Down renko brick
+            {
+                if (ShowExitSignals)
+                {
+                    Draw.Text(this, LongOff + CurrentBar, "x", 0, High[0] + Signal_Offset * TickSize * 3, ExitColor);
+                }
+                inLongTrade = false;
+            }
+            else if (inShortTrade && Close[0] > Open[0]) // Up renko brick
+            {
+                if (ShowExitSignals)
+                {
+                    Draw.Text(this, ShortOff + CurrentBar, "x", 0, Low[0] - Signal_Offset * TickSize * 3, ExitColor);
+                }
+                inShortTrade = false;
+            }
+            
+            // Check for entry conditions
+            if (ShowEntrySignals && !inLongTrade && !inShortTrade)
+            {
+                // Calculate current confluence state with filters
+                double currentConfluence = 0;
+                
+                // Check if both indicators meet threshold and separation requirements
+                bool me1Valid = ValidateIndicator(meIndicator1);
+                bool me2Valid = ValidateIndicator(meIndicator2);
+                
+                if (me1Valid && me2Valid && me1Signal == 1 && me2Signal == 1)
+                    currentConfluence = 1; // Both indicators bullish (Up > Dn)
+                else if (me1Valid && me2Valid && me1Signal == -1 && me2Signal == -1)
+                    currentConfluence = -1; // Both indicators bearish (Dn > Up)
+
+                // Signal Type 1: Initial Crossover Alignment
+                // When both indicators align in same direction for the first time
+                if (currentConfluence != 0 && lastConfluenceSignal == 0)
+                {
+                    if (currentConfluence == 1) // Both indicators bullish
+                    {
+                        Draw.ArrowUp(this, LongOn + CurrentBar + "_initial", true, 0, Low[0] - Signal_Offset * TickSize, LongEntryColor);
+                        inLongTrade = true;
+                    }
+                    else if (currentConfluence == -1) // Both indicators bearish
+                    {
+                        Draw.ArrowDown(this, ShortOn + CurrentBar + "_initial", true, 0, High[0] + Signal_Offset * TickSize, ShortEntryColor);
+                        inShortTrade = true;
+                    }
+                }
+                // Signal Type 2: Trend Continuation
+                // When ME1 re-aligns with ME2 after temporary divergence
+                // Additional market structure filter for continuation signals
+                else if (currentConfluence != 0 && lastConfluenceSignal != currentConfluence && lastConfluenceSignal != 0)
+                {
+                    // Check market structure for trend continuation
+                    bool trendUp = IsTrendContinuingUp();
+                    bool trendDown = IsTrendContinuingDown();
+                    
+                    if (currentConfluence == 1 && trendUp) // ME1 re-aligned bullish with continuing uptrend
+                    {
+                        Draw.Diamond(this, "LongMTF" + CurrentBar + "_continuation", true, 0, Low[0] - Signal_Offset * TickSize, LongEntryColor);
+                        inLongTrade = true;
+                    }
+                    else if (currentConfluence == -1 && trendDown) // ME1 re-aligned bearish with continuing downtrend
+                    {
+                        Draw.Diamond(this, "ShortMTF" + CurrentBar + "_continuation", true, 0, High[0] + Signal_Offset * TickSize, ShortEntryColor);
+                        inShortTrade = true;
+                    }
+                }
+                
+                // Update confluence state
+                lastConfluenceSignal = currentConfluence;
+            }
+        }
+
+        #region Properties
+        
+        // Signal Settings
+        [NinjaScriptProperty]
+        [Display(Name = "Show Entry Signals", Order = 0, GroupName = "Signal Settings")]
+        public bool ShowEntrySignals { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Long Entry", GroupName = "Signal Settings", Order = 1)]
+        public string LongOn { get; set; }
+        
+        [NinjaScriptProperty]
+        [XmlIgnore]
+        [Display(Name = "Long Entry Color", GroupName = "Signal Settings", Order = 2)]
+        public Brush LongEntryColor { get; set; }
+        
+        [Browsable(false)]
+        public string LongEntryColorSerializable
+        {
+            get { return Serialize.BrushToString(LongEntryColor); }
+            set { LongEntryColor = Serialize.StringToBrush(value); }
+        }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Short Entry", GroupName = "Signal Settings", Order = 3)]
+        public string ShortOn { get; set; }
+        
+        [NinjaScriptProperty]
+        [XmlIgnore]
+        [Display(Name = "Short Entry Color", GroupName = "Signal Settings", Order = 4)]
+        public Brush ShortEntryColor { get; set; }
+        
+        [Browsable(false)]
+        public string ShortEntryColorSerializable
+        {
+            get { return Serialize.BrushToString(ShortEntryColor); }
+            set { ShortEntryColor = Serialize.StringToBrush(value); }
+        }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Show Exit Signals", GroupName = "Signal Settings", Order = 5)]
+        public bool ShowExitSignals { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Long Exit", GroupName = "Signal Settings", Order = 6)]
+        public string LongOff { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Short Exit", GroupName = "Signal Settings", Order = 7)]
+        public string ShortOff { get; set; }
+        
+        [NinjaScriptProperty]
+        [XmlIgnore]
+        [Display(Name = "Exit Signal Color", GroupName = "Signal Settings", Order = 8)]
+        public Brush ExitColor { get; set; }
+        
+        [Browsable(false)]
+        public string ExitColorSerializable
+        {
+            get { return Serialize.BrushToString(ExitColor); }
+            set { ExitColor = Serialize.StringToBrush(value); }
+        }
+
+        [NinjaScriptProperty]
+        [Range(0, double.MaxValue)]
+        [Display(Name = "Signals Offset", GroupName = "Signal Settings", Order = 9)]
+        public double Signal_Offset { get; set; }
+        
+        // Signal Filter Settings
+        [NinjaScriptProperty]
+        [Range(0, 100)]
+        [Display(Name = "Min Threshold", Description = "Minimum threshold for winning ME line", Order = 1, GroupName = "Signal Filters")]
+        public double MinThreshold { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(0, 50)]
+        [Display(Name = "Min Separation", Description = "Minimum separation between Up and Dn lines", Order = 2, GroupName = "Signal Filters")]
+        public double MinSeparation { get; set; }
+        
+        // First ME Indicator Settings
+        [NinjaScriptProperty]
+        [Range(1, 20)]
+        [Display(Name = "ME1 Lookback", Description = "First Market Energy lookback parameter", Order = 1, GroupName = "ME1 Settings")]
+        public int ME1Lookback { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(50, 200)]
+        [Display(Name = "ME1 Threshold", Description = "First Market Energy threshold parameter", Order = 2, GroupName = "ME1 Settings")]
+        public int ME1Threshold { get; set; }
+        
+        [NinjaScriptProperty]
+        [Display(Name = "ME1 Type", Description = "First Market Energy enum type", Order = 3, GroupName = "ME1 Settings")]
+        public EnumType ME1EnumType { get; set; }
+        
+        // Second ME Indicator Settings
+        [NinjaScriptProperty]
+        [Range(1, 100)]
+        [Display(Name = "ME2 Lookback", Description = "Second Market Energy lookback parameter", Order = 1, GroupName = "ME2 Settings")]
+        public int ME2Lookback { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(50, 500)]
+        [Display(Name = "ME2 Threshold", Description = "Second Market Energy threshold parameter", Order = 2, GroupName = "ME2 Settings")]
+        public int ME2Threshold { get; set; }
+        
+        [NinjaScriptProperty]
+        [Display(Name = "ME2 Type", Description = "Second Market Energy enum type", Order = 3, GroupName = "ME2 Settings")]
+        public EnumType ME2EnumType { get; set; }
+
+        #endregion
+    }
+}
